@@ -4,6 +4,8 @@ import 'package:flutter/physics.dart';
 import 'package:waterfall_flow/waterfall_flow.dart';
 
 import 'detail_screen.dart';
+import 'artist_context.dart';
+import 'artist_screen.dart';
 import 'feed_screen.dart';
 import 'ugoira_player.dart';
 import 'web/pixiv_web_models.dart';
@@ -37,8 +39,9 @@ class DetailPage extends StatefulWidget {
   final ValueChanged<int>? onInnerEdge;
   final bool active;
   final bool preload;
+  final ArtistContext? artist;
 
-  const DetailPage({super.key, required this.illust, this.onInnerEdge, this.active = true, this.preload = false});
+  const DetailPage({super.key, required this.illust, this.onInnerEdge, this.active = true, this.preload = false, this.artist});
 
   @override
   State<DetailPage> createState() => _DetailPageState();
@@ -59,6 +62,12 @@ class _DetailPageState extends State<DetailPage> with AutomaticKeepAliveClientMi
   List<String> _relatedNext = [];
   bool _relatedLoading = false;
   String? _relatedFailure;
+  WebUserFull? _author;
+  List<WebDiscoveryIllust> _artistWorks = [];
+  List<String> _artistOrder = [];
+  int _artistIndex = -1;
+  bool _artistLoading = false;
+  String? _artistFailure;
 
   @override
   bool get wantKeepAlive => true;
@@ -102,6 +111,7 @@ class _DetailPageState extends State<DetailPage> with AutomaticKeepAliveClientMi
         }
       });
       _precacheInnerPage(1);
+      _fetchAuthor();
     } catch (e, stack) {
       debugPrint('detail failed $id: $e\n$stack');
       if (!mounted) return;
@@ -109,6 +119,124 @@ class _DetailPageState extends State<DetailPage> with AutomaticKeepAliveClientMi
         _failure = e.toString();
         _loading = false;
       });
+    }
+  }
+
+  Future<void> _fetchAuthor() async {
+    if (widget.artist != null) return;
+    final userId = _detail?.userId ?? widget.illust.userId;
+    if (userId == null || userId.isEmpty) return;
+    if (_author != null || _artistLoading) return;
+    setState(() {
+      _artistLoading = true;
+      _artistFailure = null;
+    });
+    try {
+      final all = (await WebSession.instance.client.userWorksAll(userId)).body;
+      if (!mounted) return;
+      final illustIds = all.illustIds;
+      final mangaIds = all.mangaIds;
+      final order = [...illustIds, ...mangaIds]
+        ..sort((a, b) => (int.tryParse(b) ?? -1).compareTo(int.tryParse(a) ?? -1));
+      final currentId = widget.illust.id;
+      final currentIndex = order.indexOf(currentId);
+      final windowIds = <String>{};
+      if (currentIndex >= 0) {
+        for (var i = currentIndex - 1; i <= currentIndex + 1; i++) {
+          if (i >= 0 && i < order.length) windowIds.add(order[i]);
+        }
+      }
+      for (final id in order.take(12)) {
+        windowIds.add(id);
+      }
+      final windowIllustIds = windowIds.where(illustIds.contains).toList();
+      final windowMangaIds = windowIds.where(mangaIds.contains).toList();
+      final hydrated = await Future.wait([
+        windowIllustIds.isEmpty
+            ? Future.value(WebUserProfileWorksResponse(false, body: WebUserProfileWorksBody()))
+            : WebSession.instance.client.userProfileWorks(userId, windowIllustIds),
+        windowMangaIds.isEmpty
+            ? Future.value(WebUserProfileWorksResponse(false, body: WebUserProfileWorksBody()))
+            : WebSession.instance.client.userProfileWorks(userId, windowMangaIds, workCategory: 'manga'),
+      ]);
+      if (!mounted) return;
+      final byId = <String, WebDiscoveryIllust>{
+        ...(hydrated[0] as WebUserProfileWorksResponse).body.works,
+        ...(hydrated[1] as WebUserProfileWorksResponse).body.works,
+      };
+      setState(() {
+        _artistOrder = order;
+        _artistIndex = currentIndex;
+        _artistWorks = [for (final id in order) if (byId[id] != null) byId[id]!];
+        _artistLoading = false;
+      });
+      try {
+        final author = (await WebSession.instance.client.userFull(userId)).body;
+        if (!mounted) return;
+        setState(() => _author = author);
+      } catch (e, stack) {
+        debugPrint('author user failed $userId: $e\n$stack');
+      }
+    } catch (e, stack) {
+      debugPrint('author failed $userId: $e\n$stack');
+      if (!mounted) return;
+      setState(() {
+        _artistLoading = false;
+        _artistFailure = e.toString();
+      });
+    }
+  }
+
+  void _openArtist() {
+    final userId = _detail?.userId ?? widget.illust.userId;
+    if (userId == null || userId.isEmpty) return;
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => ArtistScreen(
+          userId: userId,
+          initialName: _author?.name ?? _detail?.userName ?? widget.illust.userName,
+          initialAvatarUrl: _authorAvatar() ?? widget.illust.profileImageUrl,
+        ),
+      ),
+    );
+  }
+
+  String? _authorAvatar() {
+    final author = _author;
+    if (author == null) return null;
+    if (author.imageBig.isNotEmpty) return author.imageBig;
+    if (author.image.isNotEmpty) return author.image;
+    return null;
+  }
+
+  ArtistContext? _stripContext() {
+    final userId = _detail?.userId ?? widget.illust.userId;
+    if (userId == null || userId.isEmpty) return null;
+    return ArtistContext(
+      userId: userId,
+      name: _author?.name ?? _detail?.userName ?? widget.illust.userName ?? '',
+      avatarUrl: _authorAvatar() ?? widget.illust.profileImageUrl ?? '',
+      orderIds: _artistOrder.isNotEmpty ? List<String>.of(_artistOrder) : null,
+    );
+  }
+
+  void _openArtistWork(int index) {
+    final items = List<WebDiscoveryIllust>.of(_artistWorks);
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => DetailScreen(items: items, initialIndex: index, artist: _stripContext()),
+      ),
+    );
+  }
+
+  void _openNeighbour(int delta) {
+    if (_artistIndex < 0 || _artistOrder.isEmpty) return;
+    final target = _artistIndex + delta;
+    if (target < 0 || target >= _artistOrder.length) return;
+    final targetId = _artistOrder[target];
+    final hydratedIndex = _artistWorks.indexWhere((w) => w.id == targetId);
+    if (hydratedIndex >= 0) {
+      _openArtistWork(hydratedIndex);
     }
   }
 
@@ -167,7 +295,7 @@ class _DetailPageState extends State<DetailPage> with AutomaticKeepAliveClientMi
           (url: page.urls.regular.isNotEmpty ? page.urls.regular : page.urls.original, width: page.width, height: page.height),
       ];
     }
-    var url = thumbUrl(illust);
+    var url = gridThumbUrl(illust);
     if (detail != null && detail.urls.regular.isNotEmpty) {
       url = detail.urls.regular;
     }
@@ -205,14 +333,14 @@ class _DetailPageState extends State<DetailPage> with AutomaticKeepAliveClientMi
     return 1;
   }
 
-  Widget _stillImage(String url) {
+  Widget _stillImage(String url, {BoxFit fit = BoxFit.cover, Alignment alignment = Alignment.topCenter}) {
     if (url.isEmpty) return const Icon(Icons.broken_image);
     return GestureDetector(
       onTap: _toggleChrome,
       child: Image(
         image: NetworkImage(url, headers: imageHeaders),
-        fit: BoxFit.cover,
-        alignment: Alignment.topCenter,
+        fit: fit,
+        alignment: alignment,
         gaplessPlayback: true,
         loadingBuilder: (context, child, progress) {
           if (progress == null) return child;
@@ -230,6 +358,18 @@ class _DetailPageState extends State<DetailPage> with AutomaticKeepAliveClientMi
     );
   }
 
+  double? _viewerCap(BuildContext context) {
+    final viewport = MediaQuery.sizeOf(context);
+    if (viewport.width <= viewport.height) return null;
+    final cap = viewport.height - kToolbarHeight - 16;
+    return cap > 200 ? cap : null;
+  }
+
+  double? _cappedHeight(double aspect, double viewWidth, double? cap) {
+    if (cap == null || aspect <= 0) return null;
+    return viewWidth / aspect > cap ? cap : null;
+  }
+
   Widget _multiViewer(List<({String url, int width, int height})> pages) {
     final controller = _innerController!;
     final desktop =
@@ -242,10 +382,14 @@ class _DetailPageState extends State<DetailPage> with AutomaticKeepAliveClientMi
         final viewWidth = constraints.maxWidth.isFinite
             ? constraints.maxWidth
             : MediaQuery.of(context).size.width;
+        final cap = _viewerCap(context);
         final heights = <double>[];
+        final contained = <bool>[];
         for (final page in pages) {
           final aspect = _aspectFor(page.url, page.width, page.height);
-          heights.add(viewWidth / (aspect <= 0 ? 1 : aspect));
+          final capped = _cappedHeight(aspect, viewWidth, cap);
+          heights.add(capped ?? viewWidth / (aspect <= 0 ? 1 : aspect));
+          contained.add(capped != null);
         }
         return AnimatedBuilder(
           animation: controller,
@@ -286,7 +430,13 @@ class _DetailPageState extends State<DetailPage> with AutomaticKeepAliveClientMi
                         child: SizedBox(
                           width: viewWidth,
                           height: heights[index],
-                          child: _stillImage(pages[index].url),
+                          child: contained[index]
+                              ? _stillImage(
+                                  pages[index].url,
+                                  fit: BoxFit.contain,
+                                  alignment: Alignment.center,
+                                )
+                              : _stillImage(pages[index].url),
                         ),
                       ),
                     ),
@@ -375,7 +525,6 @@ class _DetailPageState extends State<DetailPage> with AutomaticKeepAliveClientMi
     final illust = widget.illust;
     final detail = _detail;
     final title = detail?.title ?? illust.title;
-    final author = detail?.userName ?? illust.userName ?? '';
     final tagViews = detail != null
         ? [
             for (final t in detail.tags.tags)
@@ -388,6 +537,8 @@ class _DetailPageState extends State<DetailPage> with AutomaticKeepAliveClientMi
           ]
         : [for (final t in illust.tags) (tag: t, translated: null as String?)];
     final isUgoira = (detail?.illustType ?? illust.illustType) == 2;
+    final viewWidth = MediaQuery.sizeOf(context).width;
+    final cap = _viewerCap(context);
     final Widget viewer;
     if (_loading) {
       viewer = const AspectRatio(aspectRatio: 1, child: Center(child: CircularProgressIndicator()));
@@ -417,21 +568,31 @@ class _DetailPageState extends State<DetailPage> with AutomaticKeepAliveClientMi
     } else if (isUgoira) {
       final pages = _pageImages(illust, detail);
       final first = pages.first;
-      final imageUrl = first.url.isNotEmpty ? first.url : thumbUrl(illust);
-      viewer = AspectRatio(
-        aspectRatio: _aspectFor(imageUrl, detail?.width ?? illust.width, detail?.height ?? illust.height),
-        child: UgoiraPlayer(illustId: illust.id, posterUrl: imageUrl, active: widget.active, preload: widget.preload),
-      );
+      final imageUrl = first.url.isNotEmpty ? first.url : gridThumbUrl(illust);
+      final aspect = _aspectFor(imageUrl, detail?.width ?? illust.width, detail?.height ?? illust.height);
+      final capped = _cappedHeight(aspect, viewWidth, cap);
+      final player = UgoiraPlayer(illustId: illust.id, posterUrl: imageUrl, active: widget.active, preload: widget.preload);
+      viewer = capped != null
+          ? SizedBox(width: double.infinity, height: capped, child: player)
+          : AspectRatio(aspectRatio: aspect, child: player);
     } else {
       final pages = _pageImages(illust, detail);
       if (pages.length > 1 && _innerController != null) {
         viewer = _multiViewer(pages);
       } else {
         final single = pages.first;
-        viewer = AspectRatio(
-          aspectRatio: _aspectFor(single.url, single.width, single.height),
-          child: Stack(fit: StackFit.expand, children: [_stillImage(single.url)]),
-        );
+        final aspect = _aspectFor(single.url, single.width, single.height);
+        final capped = _cappedHeight(aspect, viewWidth, cap);
+        viewer = capped != null
+            ? SizedBox(
+                width: double.infinity,
+                height: capped,
+                child: _stillImage(single.url, fit: BoxFit.contain, alignment: Alignment.center),
+              )
+            : AspectRatio(
+                aspectRatio: aspect,
+                child: Stack(fit: StackFit.expand, children: [_stillImage(single.url)]),
+              );
       }
     }
     return ListView(
@@ -443,7 +604,6 @@ class _DetailPageState extends State<DetailPage> with AutomaticKeepAliveClientMi
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(title, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
-              if (author.isNotEmpty) Padding(padding: const EdgeInsets.only(top: 4), child: Text(author)),
               if (tagViews.isNotEmpty)
                 Padding(
                   padding: const EdgeInsets.only(top: 8),
@@ -473,8 +633,123 @@ class _DetailPageState extends State<DetailPage> with AutomaticKeepAliveClientMi
             ],
           ),
         ),
+        _artistStrip(),
         _relatedSection(),
       ],
+    );
+  }
+
+  Widget _artistStrip() {
+    if (widget.artist != null) return const SizedBox.shrink();
+    if (_artistLoading && _artistWorks.isEmpty) {
+      return const Padding(
+        padding: EdgeInsets.fromLTRB(12, 4, 12, 8),
+        child: Center(
+          child: Padding(padding: EdgeInsets.all(8), child: CircularProgressIndicator()),
+        ),
+      );
+    }
+    if (_artistWorks.isEmpty) {
+      if (_artistFailure != null) {
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'Artist works failed to load',
+                  style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.error),
+                ),
+              ),
+              TextButton(onPressed: _fetchAuthor, child: const Text('Retry')),
+            ],
+          ),
+        );
+      }
+      return const SizedBox.shrink();
+    }
+    final prevId = _artistIndex > 0 ? _artistOrder[_artistIndex - 1] : null;
+    final nextId =
+        _artistIndex >= 0 && _artistIndex + 1 < _artistOrder.length ? _artistOrder[_artistIndex + 1] : null;
+    final prevHydrated = prevId != null && _artistWorks.any((w) => w.id == prevId);
+    final nextHydrated = nextId != null && _artistWorks.any((w) => w.id == nextId);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(6),
+                  onTap: _openArtist,
+                  child: const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 4),
+                    child: Text('More from this artist',
+                        style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+                  ),
+                ),
+              ),
+              if (prevId != null)
+                TextButton(
+                  onPressed: prevHydrated ? () => _openNeighbour(-1) : null,
+                  child: const Text('‹ Prev'),
+                ),
+              if (nextId != null)
+                TextButton(
+                  onPressed: nextHydrated ? () => _openNeighbour(1) : null,
+                  child: const Text('Next ›'),
+                ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          SizedBox(
+            height: 96,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              itemCount: _artistWorks.length,
+              separatorBuilder: (_, _) => const SizedBox(width: 6),
+              itemBuilder: (context, index) {
+                final work = _artistWorks[index];
+                final selected = work.id == widget.illust.id;
+                final url = gridThumbUrl(work);
+                return GestureDetector(
+                  onTap: selected ? null : () => _openArtistWork(index),
+                  child: Container(
+                    width: 96,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(6),
+                      border: selected ? Border.all(color: Theme.of(context).colorScheme.primary, width: 2) : null,
+                    ),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(6),
+                      child: Stack(
+                        fit: StackFit.expand,
+                        children: [
+                          if (url.isEmpty)
+                            const ColoredBox(color: Colors.black12, child: Icon(Icons.broken_image))
+                          else
+                            Image(
+                              image: NetworkImage(url, headers: imageHeaders),
+                              fit: BoxFit.cover,
+                              errorBuilder: (context, error, stackTrace) =>
+                                  const ColoredBox(color: Colors.black12, child: Icon(Icons.broken_image)),
+                            ),
+                          if (work.illustType == 2)
+                            const Positioned(top: 4, left: 4, child: TileBadge('UGOIRA'))
+                          else if (work.pageCount > 1)
+                            Positioned(top: 4, right: 4, child: TileBadge('${work.pageCount}')),
+                        ],
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
+      ),
     );
   }
 

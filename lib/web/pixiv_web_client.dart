@@ -179,6 +179,10 @@ class PixivWebClient {
       query: {'full': 1},
       referer: userReferer(id),
     );
+    final body = data['body'];
+    if (body is Map && body['social'] is List) {
+      body['social'] = <String, dynamic>{};
+    }
     return WebUserFullResponse.fromMap(data);
   }
 
@@ -196,6 +200,40 @@ class PixivWebClient {
       }
     }
     return WebUserWorksAllResponse.fromMap(data);
+  }
+
+  Future<WebUserProfileWorksResponse> userProfileWorks(
+    String userId,
+    List<String> ids, {
+    String workCategory = 'illust',
+  }) async {
+    final works = <String, WebDiscoveryIllust>{};
+    var error = false;
+    var message = '';
+    for (var i = 0; i < ids.length; i += 50) {
+      final chunk = ids.sublist(i, (i + 50).clamp(0, ids.length));
+      final qs = [
+        'work_category=${Uri.encodeComponent(workCategory)}',
+        'is_first_page=1',
+        'lang=en',
+        for (final id in chunk) 'ids[]=${Uri.encodeComponent(id)}',
+      ].join('&');
+      final data = await _get(
+        '/ajax/user/$userId/profile/illusts?$qs',
+        referer: '${userReferer(userId)}/illustrations',
+      );
+      final response = WebUserProfileWorksResponse.fromMap(data);
+      if (response.error) {
+        error = true;
+        message = response.message;
+      }
+      works.addAll(response.body.works);
+    }
+    return WebUserProfileWorksResponse(
+      error,
+      message: message,
+      body: WebUserProfileWorksBody(works: works),
+    );
   }
 
   Future<WebCommentsResponse> comments(

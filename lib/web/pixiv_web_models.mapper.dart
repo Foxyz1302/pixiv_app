@@ -7144,6 +7144,339 @@ class _WebCommentsResponseCopyWithImpl<$R, $Out>
       _WebCommentsResponseCopyWithImpl<$R2, $Out2>($value, $cast, t);
 }
 
+class WebUserProfileWorksBodyMapper
+    extends ClassMapperBase<WebUserProfileWorksBody> {
+  WebUserProfileWorksBodyMapper._();
+
+  static WebUserProfileWorksBodyMapper? _instance;
+  static WebUserProfileWorksBodyMapper ensureInitialized() {
+    if (_instance == null) {
+      MapperContainer.globals.use(
+        _instance = WebUserProfileWorksBodyMapper._(),
+      );
+      WebDiscoveryIllustMapper.ensureInitialized();
+    }
+    return _instance!;
+  }
+
+  @override
+  final String id = 'WebUserProfileWorksBody';
+
+  static Map<String, WebDiscoveryIllust> _$works(WebUserProfileWorksBody v) =>
+      v.works;
+  static const Field<WebUserProfileWorksBody, Map<String, WebDiscoveryIllust>>
+  _f$works = Field('works', _$works, opt: true, def: const {});
+
+  @override
+  final MappableFields<WebUserProfileWorksBody> fields = const {
+    #works: _f$works,
+  };
+
+  static WebUserProfileWorksBody _instantiate(DecodingData data) {
+    return WebUserProfileWorksBody(works: data.dec(_f$works));
+  }
+
+  @override
+  final Function instantiate = _instantiate;
+
+  static WebUserProfileWorksBody fromMap(Map<String, dynamic> map) {
+    return ensureInitialized().decodeMap<WebUserProfileWorksBody>(map);
+  }
+
+  static WebUserProfileWorksBody fromJson(String json) {
+    return ensureInitialized().decodeJson<WebUserProfileWorksBody>(json);
+  }
+}
+
+mixin WebUserProfileWorksBodyMappable {
+  String toJson() {
+    return WebUserProfileWorksBodyMapper.ensureInitialized()
+        .encodeJson<WebUserProfileWorksBody>(this as WebUserProfileWorksBody);
+  }
+
+  Map<String, dynamic> toMap() {
+    return WebUserProfileWorksBodyMapper.ensureInitialized()
+        .encodeMap<WebUserProfileWorksBody>(this as WebUserProfileWorksBody);
+  }
+
+  WebUserProfileWorksBodyCopyWith<
+    WebUserProfileWorksBody,
+    WebUserProfileWorksBody,
+    WebUserProfileWorksBody
+  >
+  get copyWith =>
+      _WebUserProfileWorksBodyCopyWithImpl<
+        WebUserProfileWorksBody,
+        WebUserProfileWorksBody
+      >(this as WebUserProfileWorksBody, $identity, $identity);
+  @override
+  String toString() {
+    return WebUserProfileWorksBodyMapper.ensureInitialized().stringifyValue(
+      this as WebUserProfileWorksBody,
+    );
+  }
+
+  @override
+  bool operator ==(Object other) {
+    return WebUserProfileWorksBodyMapper.ensureInitialized().equalsValue(
+      this as WebUserProfileWorksBody,
+      other,
+    );
+  }
+
+  @override
+  int get hashCode {
+    return WebUserProfileWorksBodyMapper.ensureInitialized().hashValue(
+      this as WebUserProfileWorksBody,
+    );
+  }
+}
+
+extension WebUserProfileWorksBodyValueCopy<$R, $Out>
+    on ObjectCopyWith<$R, WebUserProfileWorksBody, $Out> {
+  WebUserProfileWorksBodyCopyWith<$R, WebUserProfileWorksBody, $Out>
+  get $asWebUserProfileWorksBody => $base.as(
+    (v, t, t2) => _WebUserProfileWorksBodyCopyWithImpl<$R, $Out>(v, t, t2),
+  );
+}
+
+abstract class WebUserProfileWorksBodyCopyWith<
+  $R,
+  $In extends WebUserProfileWorksBody,
+  $Out
+>
+    implements ClassCopyWith<$R, $In, $Out> {
+  MapCopyWith<
+    $R,
+    String,
+    WebDiscoveryIllust,
+    WebDiscoveryIllustCopyWith<$R, WebDiscoveryIllust, WebDiscoveryIllust>
+  >
+  get works;
+  $R call({Map<String, WebDiscoveryIllust>? works});
+  WebUserProfileWorksBodyCopyWith<$R2, $In, $Out2> $chain<$R2, $Out2>(
+    Then<$Out2, $R2> t,
+  );
+}
+
+class _WebUserProfileWorksBodyCopyWithImpl<$R, $Out>
+    extends ClassCopyWithBase<$R, WebUserProfileWorksBody, $Out>
+    implements
+        WebUserProfileWorksBodyCopyWith<$R, WebUserProfileWorksBody, $Out> {
+  _WebUserProfileWorksBodyCopyWithImpl(super.value, super.then, super.then2);
+
+  @override
+  late final ClassMapperBase<WebUserProfileWorksBody> $mapper =
+      WebUserProfileWorksBodyMapper.ensureInitialized();
+  @override
+  MapCopyWith<
+    $R,
+    String,
+    WebDiscoveryIllust,
+    WebDiscoveryIllustCopyWith<$R, WebDiscoveryIllust, WebDiscoveryIllust>
+  >
+  get works => MapCopyWith(
+    $value.works,
+    (v, t) => v.copyWith.$chain(t),
+    (v) => call(works: v),
+  );
+  @override
+  $R call({Map<String, WebDiscoveryIllust>? works}) =>
+      $apply(FieldCopyWithData({if (works != null) #works: works}));
+  @override
+  WebUserProfileWorksBody $make(CopyWithData data) =>
+      WebUserProfileWorksBody(works: data.get(#works, or: $value.works));
+
+  @override
+  WebUserProfileWorksBodyCopyWith<$R2, WebUserProfileWorksBody, $Out2>
+  $chain<$R2, $Out2>(Then<$Out2, $R2> t) =>
+      _WebUserProfileWorksBodyCopyWithImpl<$R2, $Out2>($value, $cast, t);
+}
+
+class WebUserProfileWorksResponseMapper
+    extends ClassMapperBase<WebUserProfileWorksResponse> {
+  WebUserProfileWorksResponseMapper._();
+
+  static WebUserProfileWorksResponseMapper? _instance;
+  static WebUserProfileWorksResponseMapper ensureInitialized() {
+    if (_instance == null) {
+      MapperContainer.globals.use(
+        _instance = WebUserProfileWorksResponseMapper._(),
+      );
+      WebUserProfileWorksBodyMapper.ensureInitialized();
+    }
+    return _instance!;
+  }
+
+  @override
+  final String id = 'WebUserProfileWorksResponse';
+
+  static bool _$error(WebUserProfileWorksResponse v) => v.error;
+  static const Field<WebUserProfileWorksResponse, bool> _f$error = Field(
+    'error',
+    _$error,
+  );
+  static String _$message(WebUserProfileWorksResponse v) => v.message;
+  static const Field<WebUserProfileWorksResponse, String> _f$message = Field(
+    'message',
+    _$message,
+    opt: true,
+    def: '',
+  );
+  static WebUserProfileWorksBody _$body(WebUserProfileWorksResponse v) =>
+      v.body;
+  static const Field<WebUserProfileWorksResponse, WebUserProfileWorksBody>
+  _f$body = Field('body', _$body, opt: true);
+
+  @override
+  final MappableFields<WebUserProfileWorksResponse> fields = const {
+    #error: _f$error,
+    #message: _f$message,
+    #body: _f$body,
+  };
+
+  static WebUserProfileWorksResponse _instantiate(DecodingData data) {
+    return WebUserProfileWorksResponse(
+      data.dec(_f$error),
+      message: data.dec(_f$message),
+      body: data.dec(_f$body),
+    );
+  }
+
+  @override
+  final Function instantiate = _instantiate;
+
+  static WebUserProfileWorksResponse fromMap(Map<String, dynamic> map) {
+    return ensureInitialized().decodeMap<WebUserProfileWorksResponse>(map);
+  }
+
+  static WebUserProfileWorksResponse fromJson(String json) {
+    return ensureInitialized().decodeJson<WebUserProfileWorksResponse>(json);
+  }
+}
+
+mixin WebUserProfileWorksResponseMappable {
+  String toJson() {
+    return WebUserProfileWorksResponseMapper.ensureInitialized()
+        .encodeJson<WebUserProfileWorksResponse>(
+          this as WebUserProfileWorksResponse,
+        );
+  }
+
+  Map<String, dynamic> toMap() {
+    return WebUserProfileWorksResponseMapper.ensureInitialized()
+        .encodeMap<WebUserProfileWorksResponse>(
+          this as WebUserProfileWorksResponse,
+        );
+  }
+
+  WebUserProfileWorksResponseCopyWith<
+    WebUserProfileWorksResponse,
+    WebUserProfileWorksResponse,
+    WebUserProfileWorksResponse
+  >
+  get copyWith =>
+      _WebUserProfileWorksResponseCopyWithImpl<
+        WebUserProfileWorksResponse,
+        WebUserProfileWorksResponse
+      >(this as WebUserProfileWorksResponse, $identity, $identity);
+  @override
+  String toString() {
+    return WebUserProfileWorksResponseMapper.ensureInitialized().stringifyValue(
+      this as WebUserProfileWorksResponse,
+    );
+  }
+
+  @override
+  bool operator ==(Object other) {
+    return WebUserProfileWorksResponseMapper.ensureInitialized().equalsValue(
+      this as WebUserProfileWorksResponse,
+      other,
+    );
+  }
+
+  @override
+  int get hashCode {
+    return WebUserProfileWorksResponseMapper.ensureInitialized().hashValue(
+      this as WebUserProfileWorksResponse,
+    );
+  }
+}
+
+extension WebUserProfileWorksResponseValueCopy<$R, $Out>
+    on ObjectCopyWith<$R, WebUserProfileWorksResponse, $Out> {
+  WebUserProfileWorksResponseCopyWith<$R, WebUserProfileWorksResponse, $Out>
+  get $asWebUserProfileWorksResponse => $base.as(
+    (v, t, t2) => _WebUserProfileWorksResponseCopyWithImpl<$R, $Out>(v, t, t2),
+  );
+}
+
+abstract class WebUserProfileWorksResponseCopyWith<
+  $R,
+  $In extends WebUserProfileWorksResponse,
+  $Out
+>
+    implements ClassCopyWith<$R, $In, $Out> {
+  WebUserProfileWorksBodyCopyWith<
+    $R,
+    WebUserProfileWorksBody,
+    WebUserProfileWorksBody
+  >
+  get body;
+  $R call({bool? error, String? message, WebUserProfileWorksBody? body});
+  WebUserProfileWorksResponseCopyWith<$R2, $In, $Out2> $chain<$R2, $Out2>(
+    Then<$Out2, $R2> t,
+  );
+}
+
+class _WebUserProfileWorksResponseCopyWithImpl<$R, $Out>
+    extends ClassCopyWithBase<$R, WebUserProfileWorksResponse, $Out>
+    implements
+        WebUserProfileWorksResponseCopyWith<
+          $R,
+          WebUserProfileWorksResponse,
+          $Out
+        > {
+  _WebUserProfileWorksResponseCopyWithImpl(
+    super.value,
+    super.then,
+    super.then2,
+  );
+
+  @override
+  late final ClassMapperBase<WebUserProfileWorksResponse> $mapper =
+      WebUserProfileWorksResponseMapper.ensureInitialized();
+  @override
+  WebUserProfileWorksBodyCopyWith<
+    $R,
+    WebUserProfileWorksBody,
+    WebUserProfileWorksBody
+  >
+  get body => ($value.body as WebUserProfileWorksBody).copyWith.$chain(
+    (v) => call(body: v),
+  );
+  @override
+  $R call({bool? error, String? message, Object? body = $none}) => $apply(
+    FieldCopyWithData({
+      if (error != null) #error: error,
+      if (message != null) #message: message,
+      if (body != $none) #body: body,
+    }),
+  );
+  @override
+  WebUserProfileWorksResponse $make(CopyWithData data) =>
+      WebUserProfileWorksResponse(
+        data.get(#error, or: $value.error),
+        message: data.get(#message, or: $value.message),
+        body: data.get(#body, or: $value.body),
+      );
+
+  @override
+  WebUserProfileWorksResponseCopyWith<$R2, WebUserProfileWorksResponse, $Out2>
+  $chain<$R2, $Out2>(Then<$Out2, $R2> t) =>
+      _WebUserProfileWorksResponseCopyWithImpl<$R2, $Out2>($value, $cast, t);
+}
+
 class WebBookmarkAddBodyMapper extends ClassMapperBase<WebBookmarkAddBody> {
   WebBookmarkAddBodyMapper._();
 

@@ -793,6 +793,32 @@ class WebCommentsResponse with WebCommentsResponseMappable {
 }
 
 @MappableClass(caseStyle: CaseStyle.snakeCase)
+class WebUserProfileWorksBody with WebUserProfileWorksBodyMappable {
+  final Map<String, WebDiscoveryIllust> works;
+
+  WebUserProfileWorksBody({this.works = const {}});
+
+  static final fromMap = WebUserProfileWorksBodyMapper.fromMap;
+  static final fromJson = WebUserProfileWorksBodyMapper.fromJson;
+}
+
+@MappableClass(caseStyle: CaseStyle.snakeCase)
+class WebUserProfileWorksResponse with WebUserProfileWorksResponseMappable {
+  final bool error;
+  final String message;
+  final WebUserProfileWorksBody body;
+
+  WebUserProfileWorksResponse(
+    this.error, {
+    this.message = '',
+    WebUserProfileWorksBody? body,
+  }) : body = body ?? WebUserProfileWorksBody();
+
+  static final fromMap = WebUserProfileWorksResponseMapper.fromMap;
+  static final fromJson = WebUserProfileWorksResponseMapper.fromJson;
+}
+
+@MappableClass(caseStyle: CaseStyle.snakeCase)
 class WebBookmarkAddBody with WebBookmarkAddBodyMappable {
   final int lastBookmarkId;
 

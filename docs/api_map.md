@@ -22,7 +22,7 @@ defaults bitten before). `lib/web` stays pure-Dart so `dart run tool/*` works.
   `Referer` only (no cookie — verified for ugoira zips). Cookie values never
   logged. dio null query params stripped (sent as `""` otherwise → 400).
 
-## Endpoints (all live-verified; `dart run tool/check_web_client.dart` → 11/11)
+## Endpoints (all live-verified; `dart run tool/check_web_client.dart` → 13/13)
 
 | Method | Wire call | Notes |
 |---|---|---|
@@ -34,15 +34,20 @@ defaults bitten before). `lib/web` stays pure-Dart so `dart run tool/*` works.
 | `followLatest({mode, p})` | `GET /ajax/follow_latest/illust` | 60 page ids + 60 hydrated thumbs, `isLastPage`; paging via `p` |
 | `ranking({mode, content, p})` | `GET /ranking.php?format=json` | No `{error,body}` envelope; 50/page denormalized; `daily_r18` verified |
 | `searchArtworks(word, {mode, sMode, order, p})` | `GET /ajax/search/artworks/{word}` | Body key `illustManga`; R18 search → 59 data (54 R18 + 5 R18G), total ~10.2M, `lastPage` 1000, `relatedTags` |
-| `userFull(id)` | `GET /ajax/user/{id}?full=1` | Wire `social` is a **map**, not a list |
+| `userFull(id)` | `GET /ajax/user/{id}?full=1` | Wire `social` is a map when linked accounts exist, `[]` when bare → coerced to `{}` (same shape-shift class as profile/all categories) |
 | `userWorksAll(id)` | `GET /ajax/user/{id}/profile/all` | Full ID maps; empty categories arrive as `[]` → coerced to `{}` |
+| `userProfileWorks(userId, ids, {workCategory})` | `GET /ajax/user/{id}/profile/illusts?work_category=illust\|manga&is_first_page=1&lang=en&ids[]=…` | Hydrates ID windows into `WebDiscoveryIllust`-shaped `works` map; chunked 50/req, illust+manga merged client-side, newest-first by numeric id |
 | `comments(id, {offset, limit})` | `GET /ajax/illusts/comments/roots` | `{comments, hasNext}` — no mobile equivalent existed |
 | `bookmarkAdd(…)` + `ensureCsrfToken()` | `GET /` → `x-csrf-token` → `POST /ajax/illusts/bookmarks/add` | Token regex over `__NEXT_DATA__`, retry on Cloudflare 403. Token acquisition verified; POST **not** exercised (avoids mutating real bookmarks) |
 | `discovery/artworks/meta` | — | HTML-head/ads only, not content. Dead end, don't use |
 
 Wire quirks: `nextIds` are ints (stringified pre-decode); `likeData` is
 `dynamic` (observed `bool`); `illust_type`/`page_count` string-encoded in
-ranking. Rate limits: app needs none; tools space requests ~2s.
+ranking. List-thumb `url`s are square crops (`c/…`, `square1200`/`custom1200`
+suffixes); rewriting to `c/540x540_70` + `master1200` (+ `custom-thumb` →
+`img-master`) yields aspect-true thumbs fit in 540px — verified live for
+single, multi, and ugoira (`gridThumbUrl`). Rate limits: app needs none;
+tools space requests ~2s.
 
 ## Retired: mobile app-API (2026-08 → 2026-09, superseded)
 

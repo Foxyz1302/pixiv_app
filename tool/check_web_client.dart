@@ -193,6 +193,32 @@ Future<void> main(List<String> args) async {
           throw StateError('empty profile/all ID maps');
         }
       });
+
+      await check('user-profile-works', () async {
+        final all = await client.userWorksAll(uid);
+        final sample = all.body.illustIds.take(5).toList();
+        final hydrated = await client.userProfileWorks(uid, sample);
+        stdout.writeln(
+          '[user-profile-works] requested=${sample.length} '
+          'returned=${hydrated.body.works.length} '
+          'first=${hydrated.body.works.keys.take(3).toList()}',
+        );
+        if (hydrated.body.works.isEmpty) {
+          throw StateError('empty profile/illusts works');
+        }
+      });
+
+      await check('user-full-list-social', () async {
+        const bareUid = '124750888';
+        final user = await client.userFull(bareUid);
+        stdout.writeln(
+          '[user-full-list-social] userId=${user.body.userId} '
+          'nameLen=${user.body.name.length}',
+        );
+        if (user.body.userId.isEmpty) {
+          throw StateError('empty userFull body for list-social user');
+        }
+      });
     }
 
     await check('comments', () async {

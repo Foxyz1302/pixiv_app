@@ -10,6 +10,7 @@ import 'web_session.dart';
 
 const imageReferer = 'https://www.pixiv.net/';
 const imageHeaders = {'Referer': imageReferer};
+const minTileAspect = 1 / 2;
 
 String thumbUrl(WebDiscoveryIllust illust) {
   if (illust.url.isNotEmpty) return illust.url;
@@ -19,9 +20,22 @@ String thumbUrl(WebDiscoveryIllust illust) {
   return '';
 }
 
+final _thumbSizePattern = RegExp(r'/c/[^/]+/');
+
+String gridThumbUrl(WebDiscoveryIllust illust) {
+  var url = thumbUrl(illust);
+  if (!url.contains('i.pximg.net')) return url;
+  url = url.replaceAll(_thumbSizePattern, '/c/540x540_70/');
+  url = url.replaceAll('custom-thumb', 'img-master');
+  url = url.replaceAll('custom1200', 'master1200');
+  url = url.replaceAll('square1200', 'master1200');
+  return url;
+}
+
 double thumbAspect(WebDiscoveryIllust illust) {
   if (illust.width > 0 && illust.height > 0) {
-    return illust.width / illust.height;
+    final aspect = illust.width / illust.height;
+    return aspect < minTileAspect ? minTileAspect : aspect;
   }
   return 1.0;
 }
@@ -139,6 +153,47 @@ class _FeedScreenState extends State<FeedScreen> {
                           }, childCount: feedItems.length),
                         ),
                       ),
+                      SliverToBoxAdapter(
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(12, 8, 12, 24),
+                          child: SignalBuilder(
+                            builder: (context) {
+                              final loadingMore = FeedStore.instance.isLoadingMore.value;
+                              final moreFailure = FeedStore.instance.moreError.value;
+                              final count = FeedStore.instance.items.value.length;
+                              if (loadingMore) {
+                                return const Center(
+                                  child: Padding(
+                                    padding: EdgeInsets.all(8),
+                                    child: CircularProgressIndicator(),
+                                  ),
+                                );
+                              }
+                              if (moreFailure != null) {
+                                return Center(
+                                  child: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Text(moreFailure),
+                                      const SizedBox(height: 8),
+                                      OutlinedButton(
+                                        onPressed: FeedStore.instance.loadMore,
+                                        child: const Text('Retry'),
+                                      ),
+                                    ],
+                                  ),
+                                );
+                              }
+                              return Center(
+                                child: OutlinedButton(
+                                  onPressed: FeedStore.instance.loadMore,
+                                  child: Text('Load more ($count shown)'),
+                                ),
+                              );
+                            },
+                          ),
+                        ),
+                      ),
                     ],
                   ),
                 );
@@ -159,7 +214,7 @@ class FeedTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final url = thumbUrl(illust);
+    final url = gridThumbUrl(illust);
     final tileWidth = WebSession.instance.tileWidth.peek();
     return AspectRatio(
       aspectRatio: thumbAspect(illust),
