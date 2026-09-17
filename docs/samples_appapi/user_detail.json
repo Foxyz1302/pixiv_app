@@ -1,0 +1,62 @@
+{
+ "user": {
+  "id": 44300758,
+  "name": "Boppin Drawing",
+  "account": "boppindrawing",
+  "profile_image_urls": {
+   "medium": "https://i.pximg.net/user-profile/img/2025/06/08/00/55/40/27462308_feab82ad13775850b7095c83b945c3a2_170.jpg"
+  },
+  "comment": "",
+  "is_followed": true,
+  "is_access_blocking_user": false
+ },
+ "profile": {
+  "webpage": "",
+  "gender": "female",
+  "birth": "",
+  "birth_day": "12-22",
+  "birth_year": 0,
+  "region": "",
+  "address_id": 0,
+  "country_code": "",
+  "job": "",
+  "job_id": 0,
+  "total_follow_users": 342,
+  "total_mypixiv_users": 0,
+  "total_illusts": 799,
+  "total_manga": 0,
+  "total_novels": 0,
+  "total_illust_bookmarks_public": 2248,
+  "total_illust_series": 0,
+  "total_novel_series": 0,
+  "background_image_url": "https://i.pximg.net/c/1200x600_90_a2_g5/background/img/2023/03/15/04/32/42/44300758_4efb691c3ad889ba334872c4c22d2500_master1200.jpg",
+  "twitter_account": "",
+  "twitter_url": null,
+  "pawoo_url": null,
+  "is_premium": true,
+  "is_using_custom_profile_image": true
+ },
+ "profile_publicity": {
+  "gender": "public",
+  "region": "public",
+  "birth_day": "public",
+  "birth_year": "public",
+  "job": "public",
+  "pawoo": true
+ },
+ "workspace": {
+  "pc": "",
+  "monitor": "",
+  "tool": "",
+  "scanner": "",
+  "tablet": "",
+  "mouse": "",
+  "printer": "",
+  "desktop": "",
+  "music": "",
+  "desk": "",
+  "chair": "",
+  "comment": "",
+  "workspace_image_url": null
+ }
+}
