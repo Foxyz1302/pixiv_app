@@ -55,6 +55,7 @@ class _DetailScreenState extends State<DetailScreen> {
     return Scaffold(
       appBar: AppBar(),
       body: PageView.builder(
+        physics: const SnappyPagePhysics(),
         controller: _controller,
         itemCount: widget.items.length,
         onPageChanged: (index) {
@@ -74,15 +75,9 @@ class _DetailScreenState extends State<DetailScreen> {
 
   void _onInnerEdge(int direction) {
     if (direction > 0) {
-      _controller.nextPage(
-        duration: const Duration(milliseconds: 300),
-        curve: Curves.easeOut,
-      );
+      _controller.nextPage(duration: const Duration(milliseconds: 100), curve: Curves.easeOut);
     } else {
-      _controller.previousPage(
-        duration: const Duration(milliseconds: 300),
-        curve: Curves.easeOut,
-      );
+      _controller.previousPage(duration: const Duration(milliseconds: 100), curve: Curves.easeOut);
     }
   }
 }

@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/physics.dart';
 import 'package:waterfall_flow/waterfall_flow.dart';
 
 import 'detail_screen.dart';
@@ -7,6 +8,29 @@ import 'feed_screen.dart';
 import 'ugoira_player.dart';
 import 'web/pixiv_web_models.dart';
 import 'web_session.dart';
+
+double innerViewportHeight(List<double> heights, double pos) {
+  if (heights.isEmpty) return 0;
+  final maxIndex = heights.length - 1;
+  final clamped = pos.clamp(0.0, maxIndex.toDouble());
+  final lo = clamped.floor().clamp(0, maxIndex);
+  final hi = clamped.ceil().clamp(0, maxIndex);
+  final t = clamped - lo;
+  if (lo == hi || t == 0) return heights[lo];
+  return heights[lo] * (1 - t) + heights[hi] * t;
+}
+
+class SnappyPagePhysics extends PageScrollPhysics {
+  const SnappyPagePhysics({super.parent});
+
+  @override
+  SnappyPagePhysics applyTo(ScrollPhysics? ancestor) {
+    return SnappyPagePhysics(parent: buildParent(ancestor));
+  }
+
+  @override
+  SpringDescription get spring => SpringDescription.withDampingRatio(mass: 0.35, stiffness: 220.0, ratio: 1.15);
+}
 
 class DetailPage extends StatefulWidget {
   final WebDiscoveryIllust illust;
@@ -187,7 +211,8 @@ class _DetailPageState extends State<DetailPage> with AutomaticKeepAliveClientMi
       onTap: _toggleChrome,
       child: Image(
         image: NetworkImage(url, headers: imageHeaders),
-        fit: BoxFit.contain,
+        fit: BoxFit.cover,
+        alignment: Alignment.topCenter,
         gaplessPlayback: true,
         loadingBuilder: (context, child, progress) {
           if (progress == null) return child;
@@ -207,96 +232,140 @@ class _DetailPageState extends State<DetailPage> with AutomaticKeepAliveClientMi
 
   Widget _multiViewer(List<({String url, int width, int height})> pages) {
     final controller = _innerController!;
-    final current = pages[_innerIndex.clamp(0, pages.length - 1)];
-    final aspect = _aspectFor(current.url, current.width, current.height);
     final desktop =
         !kIsWeb &&
         (defaultTargetPlatform == TargetPlatform.linux ||
             defaultTargetPlatform == TargetPlatform.windows ||
             defaultTargetPlatform == TargetPlatform.macOS);
-    final showArrows = desktop && _chromeVisible;
-    return AnimatedSize(
-      duration: const Duration(milliseconds: 250),
-      curve: Curves.easeOut,
-      alignment: Alignment.topCenter,
-      child: AspectRatio(
-        aspectRatio: aspect <= 0 ? 1 : aspect,
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            NotificationListener<ScrollNotification>(
-              onNotification: (notification) {
-                if (notification is ScrollStartNotification) {
-                  _edgeDir = 0;
-                } else if (notification is OverscrollNotification && notification.dragDetails != null) {
-                  _edgeDir = notification.overscroll.sign.toInt();
-                } else if (notification is ScrollEndNotification && _edgeDir != 0) {
-                  final direction = _edgeDir;
-                  _edgeDir = 0;
-                  widget.onInnerEdge?.call(direction);
-                }
-                return false;
-              },
-              child: PageView.builder(
-                controller: controller,
-                itemCount: pages.length,
-                onPageChanged: _onInnerPageChanged,
-                itemBuilder: (context, index) => Center(child: _stillImage(pages[index].url)),
-              ),
-            ),
-            if (showArrows && _innerIndex > 0)
-              Positioned(
-                left: 4,
-                top: 0,
-                bottom: 0,
-                child: Center(
-                  child: _NavChevron(
-                    icon: Icons.chevron_left,
-                    onTap: () => controller.previousPage(duration: const Duration(milliseconds: 250), curve: Curves.easeOut),
-                  ),
-                ),
-              ),
-            if (showArrows && _innerIndex < pages.length - 1)
-              Positioned(
-                right: 4,
-                top: 0,
-                bottom: 0,
-                child: Center(
-                  child: _NavChevron(
-                    icon: Icons.chevron_right,
-                    onTap: () => controller.nextPage(duration: const Duration(milliseconds: 250), curve: Curves.easeOut),
-                  ),
-                ),
-              ),
-            if (_chromeVisible && pages.length <= 20)
-              Positioned(
-                left: 0,
-                right: 0,
-                bottom: 8,
-                child: Center(
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-                    decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.circular(12)),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        for (var i = 0; i < pages.length; i++)
-                          GestureDetector(
-                            onTap: () => controller.animateToPage(i, duration: const Duration(milliseconds: 250), curve: Curves.easeOut),
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(horizontal: 3),
-                              child: Icon(Icons.circle, size: 8, color: i == _innerIndex ? Colors.white : Colors.white38),
-                            ),
-                          ),
-                      ],
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final viewWidth = constraints.maxWidth.isFinite
+            ? constraints.maxWidth
+            : MediaQuery.of(context).size.width;
+        final heights = <double>[];
+        for (final page in pages) {
+          final aspect = _aspectFor(page.url, page.width, page.height);
+          heights.add(viewWidth / (aspect <= 0 ? 1 : aspect));
+        }
+        return AnimatedBuilder(
+          animation: controller,
+          builder: (context, _) {
+            var pos = _innerIndex.clamp(0, pages.length - 1).toDouble();
+            final raw = controller.hasClients ? controller.page : null;
+            if (raw != null && !raw.isNaN) pos = raw;
+            final height = innerViewportHeight(heights, pos);
+            final showArrows = desktop && _chromeVisible;
+            return SizedBox(
+              width: double.infinity,
+              height: height,
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  NotificationListener<ScrollNotification>(
+                    onNotification: (notification) {
+                      if (notification is ScrollStartNotification) {
+                        _edgeDir = 0;
+                      } else if (notification is OverscrollNotification && notification.dragDetails != null) {
+                        _edgeDir = notification.overscroll.sign.toInt();
+                      } else if (notification is ScrollEndNotification && _edgeDir != 0) {
+                        final direction = _edgeDir;
+                        _edgeDir = 0;
+                        widget.onInnerEdge?.call(direction);
+                      }
+                      return false;
+                    },
+                    child: PageView.builder(
+                      physics: const SnappyPagePhysics(),
+                      controller: controller,
+                      itemCount: pages.length,
+                      onPageChanged: _onInnerPageChanged,
+                      itemBuilder: (context, index) => OverflowBox(
+                        maxWidth: viewWidth,
+                        maxHeight: double.infinity,
+                        alignment: Alignment.topCenter,
+                        child: SizedBox(
+                          width: viewWidth,
+                          height: heights[index],
+                          child: _stillImage(pages[index].url),
+                        ),
+                      ),
                     ),
                   ),
-                ),
+                  if (showArrows && _innerIndex > 0)
+                    Positioned(
+                      left: 4,
+                      top: 0,
+                      bottom: 0,
+                      child: Center(
+                        child: _NavChevron(
+                          icon: Icons.chevron_left,
+                          onTap: () => controller.previousPage(
+                            duration: const Duration(milliseconds: 250),
+                            curve: Curves.easeOut,
+                          ),
+                        ),
+                      ),
+                    ),
+                  if (showArrows && _innerIndex < pages.length - 1)
+                    Positioned(
+                      right: 4,
+                      top: 0,
+                      bottom: 0,
+                      child: Center(
+                        child: _NavChevron(
+                          icon: Icons.chevron_right,
+                          onTap: () => controller.nextPage(
+                            duration: const Duration(milliseconds: 250),
+                            curve: Curves.easeOut,
+                          ),
+                        ),
+                      ),
+                    ),
+                  if (_chromeVisible && pages.length <= 20)
+                    Positioned(
+                      left: 0,
+                      right: 0,
+                      bottom: 8,
+                      child: Center(
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                          decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.circular(12)),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              for (var i = 0; i < pages.length; i++)
+                                GestureDetector(
+                                  onTap: () => controller.animateToPage(
+                                    i,
+                                    duration: const Duration(milliseconds: 250),
+                                    curve: Curves.easeOut,
+                                  ),
+                                  child: Padding(
+                                    padding: const EdgeInsets.symmetric(horizontal: 3),
+                                    child: Icon(
+                                      Icons.circle,
+                                      size: 8,
+                                      color: i == _innerIndex ? Colors.white : Colors.white38,
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  if (_chromeVisible)
+                    Positioned(
+                      bottom: 8,
+                      right: 8,
+                      child: TileBadge('${_innerIndex + 1} / ${pages.length}'),
+                    ),
+                ],
               ),
-            if (_chromeVisible) Positioned(bottom: 8, right: 8, child: TileBadge('${_innerIndex + 1} / ${pages.length}')),
-          ],
-        ),
-      ),
+            );
+          },
+        );
+      },
     );
   }
 
