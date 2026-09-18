@@ -12,6 +12,7 @@ class WebSession {
   static const String _boxName = 'pixiv_web';
   static const String _cookieKey = 'cookie';
   static const String _tileWidthKey = 'tileWidth';
+  static const String _reverseDetailsKey = 'reverseDetails';
   static const double minTileWidth = 140;
   static const double maxTileWidth = 480;
   static const double defaultTileWidth = 280;
@@ -22,6 +23,7 @@ class WebSession {
 
   final cookie = signal('');
   final tileWidth = signal(defaultTileWidth);
+  final reverseDetails = signal(false);
 
   late final Computed<bool> loggedIn = computed(() => cookie.value.isNotEmpty);
 
@@ -72,6 +74,7 @@ class WebSession {
     tileWidth.value = storedWidth is num
         ? storedWidth.toDouble().clamp(minTileWidth, maxTileWidth).toDouble()
         : defaultTileWidth;
+    reverseDetails.value = _box.get(_reverseDetailsKey, defaultValue: false) == true;
   }
 
   void setCookie(String raw) {
@@ -92,6 +95,11 @@ class WebSession {
     final clamped = width.clamp(minTileWidth, maxTileWidth).toDouble();
     tileWidth.value = clamped;
     _box.put(_tileWidthKey, clamped);
+  }
+
+  void setReverseDetails(bool value) {
+    reverseDetails.value = value;
+    _box.put(_reverseDetailsKey, value);
   }
 
   String _normalize(String raw) {

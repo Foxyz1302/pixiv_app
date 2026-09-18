@@ -22,10 +22,10 @@ honest global position (`7 / 99`) instead of a window-local one.
 
 | Context | Entry | Order | Grows forward | Grows backward | Count | Minimap | Status |
 |---|---|---|---|---|---|---|---|
-| Discovery feed | Feed grid tap | Server sample order | Load-more footer, dedup append (live) | N/A (list head) | Exact, grows (`N shown`) | Proposed | List paging done; viewer extras pending |
-| Related | Related grid tap in detail | Server `recommend` order | Load-more via `nextIds` (live) | N/A | Exact, grows | Proposed | Same as feed |
-| Artist grid | Artist screen tap (from AppBar title, strip title, author row) | Newest-first, numeric id | No — full catalogue hydrated upfront | N/A | Exact after `profile/all` | Proposed | Works; hydration is all-upfront — see below |
-| Artist window | Strip / Prev-Next tap from generic detail | Same artist order, hydrated window (neighbours + 12 recent) | No (dead end at window edge) | No (dead end) | Global via `orderIds` (`i / N`) | Proposed | Window scope is a wart — see below |
+| Discovery feed | Feed grid tap | Server sample order | Load-more footer, dedup append (live) | N/A (list head) | Exact, grows (`N shown`) | On hold | List paging live; viewer trailing offer pending |
+| Related | Related grid tap in detail | Server `recommend` order | Load-more via `nextIds` (live) | N/A | Exact, grows | On hold | Same as feed |
+| Artist grid | Artist screen tap (AppBar title, strip title) | Newest-first, numeric id | Chunked: first 48 render, 2nd streams in, rest via Load-more footer | N/A | Exact after `profile/all` | On hold | Chunked hydration live |
+| Artist window | Strip / Prev-Next tap from generic detail | Same artist order, hydrated window (neighbours + 12 recent) | Inline "+N older" end-cell extends +24; Prev/Next hydrates on demand | Inline "+N newer" start-cell extends −24 | Global via `orderIds` (`i / N`) | On hold | Cursor live; viewer edge offer still pending |
 
 ## Known gaps (proposed, not built)
 
@@ -37,14 +37,27 @@ honest global position (`7 / 99`) instead of a window-local one.
    current highlighted. Same widget for feed / related / artist / window.
    Artist mode gets its strip back through this — synced to the actual list,
    not a separate fetch.
-2. **Artist window → full list.** The window exists because hydrating a
-   700-work catalogue on every strip tap is ~14 requests. Options: (a) keep
-   the window and let the strip title → grid path serve full browsing
-   (current); (b) hydrate in background after push and splice into the local
-   list; (c) chunked upfront hydration shared with the grid. No decision yet.
-3. **Artist grid chunked hydration.** Big artists currently block the grid on
-   the full hydrate. Progressive: render after the first 48, Load-more footer
-   hydrates the next chunk. Counts already arrive early via `profile/all`.
+2. **Artist window → full list — PARTIAL: cursor + on-demand hydrate live.**
+   The strip grows ±24 per tap via inline end-cells into the full order and
+   Prev/Next hydrates missing neighbours on demand, so the window walks the
+   whole catalogue. Inner-edge overscroll hands the gesture to the outer
+   pager via a lazily-created held-drag activity (created on first edge
+   excess so mid-list inner drags never freeze an in-flight outer settle;
+   framework settles natively, commit fling past ~12%, see
+   `resolveEndVelocity`). `test/inner_edge_drag_test.dart`
+   locks the mechanism (1:1 follow, hold-stability, boundary cross, tremor)
+   plus framework probes (ballistic stays grabbable; driven-ignore trap
+   documented) and `resolveEndVelocity` unit tests.
+   What remains: a viewer edge offer (trailing page) instead of the dead
+   end; the strip-title → grid path still serves full browsing.
+3. **Artist grid chunked hydration — DONE.** Renders after the first 48,
+   second chunk streams in, rest via Load-more footer with live counts.
 4. **End-of-list offer in viewer.** A trailing page in the outer pager when
    the context can grow forward (feed sample, related `nextIds`); artist
    contexts instead offer "open full list" at window edges. Not built.
+5. **Browsing tree — IDEA, needs real-world use first.** Browser-style
+   long-press on back showing the route trail (feed → artwork → artist → …),
+   needs named routes first (all anonymous today). The always-visible
+   Explorer breadcrumb is out (burns AppBar space). Home drawer (Discovery /
+   New from followed / Popular) is the real "get home" fix, blocked on those
+   feeds existing, not on navigation. Parked alongside minimap.

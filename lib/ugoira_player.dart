@@ -2,12 +2,72 @@ import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
-import 'package:koni_archive/koni_archive.dart';
-import 'package:koni_http_source/koni_http_source.dart';
+import 'package:koni_archive/io.dart';
 
-import 'web/pixiv_web_client.dart';
+import 'api_cache.dart';
+import 'px_cache.dart';
 import 'web/pixiv_web_models.dart';
 import 'web_session.dart';
+
+class UgoiraSessionStore {
+  static final UgoiraSessionStore instance = UgoiraSessionStore._();
+  UgoiraSessionStore._();
+
+  static const maxEntries = 2;
+
+  final _metas = <String, List<WebUgoiraFrame>>{};
+  final _frames = <String, List<Uint8List>>{};
+  final _expected = <String, List<int>>{};
+  final _totals = <String, int>{};
+  final _order = <String>[];
+
+  bool sameMeta(String id, List<WebUgoiraFrame> meta) {
+    final stored = _metas[id];
+    if (stored == null || stored.length != meta.length) return false;
+    for (var i = 0; i < meta.length; i++) {
+      if (stored[i].file != meta[i].file) return false;
+    }
+    return true;
+  }
+
+  void restore(
+    String id,
+    List<Uint8List> frames,
+    List<int> expected,
+  ) {
+    frames.addAll(_frames[id] ?? const []);
+    expected.addAll(_expected[id] ?? const []);
+    _touch(id);
+  }
+
+  int totalFor(String id) => _totals[id] ?? 0;
+
+  void store(
+    String id,
+    List<WebUgoiraFrame> meta,
+    List<Uint8List> frames,
+    List<int> expected,
+    int total,
+  ) {
+    _metas[id] = List.of(meta);
+    _frames[id] = List.of(frames);
+    _expected[id] = List.of(expected);
+    _totals[id] = total;
+    _touch(id);
+    while (_order.length > maxEntries) {
+      final evicted = _order.removeAt(0);
+      _metas.remove(evicted);
+      _frames.remove(evicted);
+      _expected.remove(evicted);
+      _totals.remove(evicted);
+    }
+  }
+
+  void _touch(String id) {
+    _order.remove(id);
+    _order.add(id);
+  }
+}
 
 class UgoiraPlayer extends StatefulWidget {
   final String illustId;
@@ -128,21 +188,33 @@ class _UgoiraPlayerState extends State<UgoiraPlayer> {
   Future<void> _load(int gen) async {
     try {
       if (_meta.isEmpty || _archive == null) {
-        final meta = await WebSession.instance.client.ugoiraMeta(
+        final meta = await ApiCache.instance.ugoiraMeta(
           widget.illustId,
         );
         if (gen != _gen || _dead) return;
         if (meta.body.frames.isEmpty) throw StateError('empty ugoira meta');
+        if (UgoiraSessionStore.instance.sameMeta(widget.illustId, meta.body.frames)) {
+          UgoiraSessionStore.instance.restore(widget.illustId, _frames, _frameExpected);
+          if (gen != _gen || _dead) return;
+          setState(() {
+            _meta = meta.body.frames;
+            _totalBytes = UgoiraSessionStore.instance.totalFor(widget.illustId);
+          });
+          if (_frames.length >= _meta.length) {
+            _loading = false;
+            if (mounted) setState(() => _done = true);
+            _lastFire = null;
+            _nextFire = null;
+            _schedule();
+            return;
+          }
+        }
         final zipUrl = meta.body.originalSrc.isNotEmpty
             ? meta.body.originalSrc
             : meta.body.src;
-        final source = await HttpRangeByteSource.open(
-          Uri.parse(zipUrl),
-          headers: {
-            'User-Agent': PixivWebClient.userAgent,
-            'Referer': PixivWebClient.defaultReferer,
-          },
-        );
+        final file = await PxCache.instance.ugoira.getSingleFile(zipUrl, headers: pxImageHeaders);
+        if (gen != _gen || _dead) return;
+        final source = await FileByteSource.open(file.path);
         if (gen != _gen || _dead) {
           await source.close();
           return;
@@ -193,6 +265,13 @@ class _UgoiraPlayerState extends State<UgoiraPlayer> {
             entry.uncompressedSize > 0 ? entry.uncompressedSize : bytes.length,
           );
           _partialBytes = 0;
+          UgoiraSessionStore.instance.store(
+            widget.illustId,
+            _meta,
+            _frames,
+            _frameExpected,
+            _totalBytes,
+          );
           if (_frames.length == 1) {
             _lastFire = null;
             _nextFire = null;
@@ -381,9 +460,9 @@ class _UgoiraPlayerState extends State<UgoiraPlayer> {
       return Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
+          spacing: 8,
           children: [
             Text(_failure!),
-            const SizedBox(height: 8),
             FilledButton(onPressed: _retry, child: const Text('Retry')),
           ],
         ),
@@ -398,9 +477,8 @@ class _UgoiraPlayerState extends State<UgoiraPlayer> {
           fit: StackFit.expand,
           children: [
             if (widget.posterUrl.isNotEmpty)
-              Image.network(
-                widget.posterUrl,
-                headers: const {'Referer': 'https://www.pixiv.net/'},
+              Image(
+                image: PxImageProvider(widget.posterUrl, headers: pxImageHeaders),
                 fit: BoxFit.contain,
                 errorBuilder: (context, error, stackTrace) =>
                     const SizedBox.shrink(),

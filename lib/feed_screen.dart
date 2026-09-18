@@ -4,6 +4,7 @@ import 'package:waterfall_flow/waterfall_flow.dart';
 
 import 'detail_screen.dart';
 import 'feed_store.dart';
+import 'px_cache.dart';
 import 'web/pixiv_web_client.dart';
 import 'web/pixiv_web_models.dart';
 import 'web_session.dart';
@@ -63,7 +64,7 @@ class _FeedScreenState extends State<FeedScreen> {
         title: const Text('Pixiv'),
         actions: [
           IconButton(icon: const Icon(Icons.refresh), onPressed: FeedStore.instance.load),
-          IconButton(icon: const Icon(Icons.grid_view), onPressed: () => showTileWidthDialog(context)),
+          IconButton(icon: const Icon(Icons.grid_view), onPressed: () => showDisplayDialog(context)),
           IconButton(icon: const Icon(Icons.settings), onPressed: () => showCookieDialog(context)),
         ],
       ),
@@ -100,9 +101,9 @@ class _FeedScreenState extends State<FeedScreen> {
                   return Center(
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
+                      spacing: 12,
                       children: [
                         const Text('Paste your PHPSESSID to start'),
-                        const SizedBox(height: 12),
                         FilledButton(onPressed: () => showCookieDialog(context), child: const Text('Open settings')),
                       ],
                     ),
@@ -115,9 +116,9 @@ class _FeedScreenState extends State<FeedScreen> {
                   return Center(
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
+                      spacing: 12,
                       children: [
                         Text(failure),
-                        const SizedBox(height: 12),
                         FilledButton(onPressed: FeedStore.instance.load, child: const Text('Retry')),
                       ],
                     ),
@@ -173,9 +174,9 @@ class _FeedScreenState extends State<FeedScreen> {
                                 return Center(
                                   child: Column(
                                     mainAxisSize: MainAxisSize.min,
+                                    spacing: 8,
                                     children: [
                                       Text(moreFailure),
-                                      const SizedBox(height: 8),
                                       OutlinedButton(
                                         onPressed: FeedStore.instance.loadMore,
                                         child: const Text('Retry'),
@@ -231,7 +232,11 @@ class FeedTile extends StatelessWidget {
                 image: ResizeImage.resizeIfNeeded(
                   (tileWidth * MediaQuery.devicePixelRatioOf(context)).round(),
                   null,
-                  NetworkImage(url, headers: imageHeaders),
+                  PxImageProvider(
+                    url,
+                    headers: imageHeaders,
+                    cacheManager: PxCache.instance.thumbs,
+                  ),
                 ),
                 fit: BoxFit.cover,
                 errorBuilder: (context, error, stackTrace) {
@@ -271,21 +276,22 @@ class TileBadge extends StatelessWidget {
   }
 }
 
-Future<void> showTileWidthDialog(BuildContext context) {
-  return showDialog<void>(context: context, builder: (context) => const _TileWidthDialog());
+Future<void> showDisplayDialog(BuildContext context) {
+  return showDialog<void>(context: context, builder: (context) => const _DisplayDialog());
 }
 
-class _TileWidthDialog extends StatelessWidget {
-  const _TileWidthDialog();
+class _DisplayDialog extends StatelessWidget {
+  const _DisplayDialog();
 
   @override
   Widget build(BuildContext context) {
     final session = WebSession.instance;
     return AlertDialog(
-      title: const Text('Grid item width'),
+      title: const Text('Display'),
       content: SignalBuilder(
         builder: (context) {
           final width = session.tileWidth.value;
+          final reversed = session.reverseDetails.value;
           return Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -312,6 +318,13 @@ class _TileWidthDialog extends StatelessWidget {
                 ],
               ),
               Text('${width.round()} px'),
+              const SizedBox(height: 8),
+              SwitchListTile(
+                title: const Text('Bottom-focused details'),
+                subtitle: const Text('Artwork first, pinned to the bottom'),
+                value: reversed,
+                onChanged: session.setReverseDetails,
+              ),
             ],
           );
         },
@@ -351,9 +364,9 @@ class _CookieDialogState extends State<_CookieDialog> {
       content: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
+        spacing: 12,
         children: [
           Text(hasCookie ? 'Logged in' : 'Not logged in'),
-          const SizedBox(height: 12),
           TextField(
             controller: _controller,
             obscureText: true,

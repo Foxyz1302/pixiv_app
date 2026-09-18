@@ -63,5 +63,6 @@ Port sources (2026-09-14): call patterns from
 discovery/ranking/comments from PixivNow
 [`docs/pixiv-web-api.md`](https://github.com/FreeNowOrg/PixivNow/blob/master/docs/pixiv-web-api.md).
 No Dart ajax client exists (pixez/pixes/pixiv_dart_api are all app-API) —
-port was necessary. Live `tool/check_*` scripts are the test strategy; no
-flutter tests (`test/` empty, stale default deleted).
+port was necessary. Live `tool/check_*` scripts are the endpoint test
+strategy; `test/` holds flutter widget/unit tests for UI mechanics
+(`inner_viewport_height_test.dart`, `inner_edge_drag_test.dart`).

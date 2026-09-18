@@ -1,61 +1,74 @@
-# Image + ugoira caching (decision doc for future agents)
+# Image + ugoira caching (implemented — keep this doc in sync)
 
-Wishlist 0.1.1 wants disk caching (same artwork currently redownloads every
-visit). Decision: `flutter_cache_manager` (+ `cached_network_image` for
-widgets). Verified against the local pub cache (3.4.1), not just docs.
+Disk caching is live (`lib/px_cache.dart`, `lib/api_cache.dart`). No
+`cached_network_image` anywhere — deliberate: the app uses its own
+`PxImageProvider` over a Dio-backed `PxFileService`, same shape as the
+niggabooru neighbor project but NOT copied 1:1 (its cache-clear path and
+single-bucket layout were suspect there).
 
-## The byte-cap problem (and the answer)
+## Layout
 
-`Config` evicts by `stalePeriod` and `maxNrOfCacheObjects` (object count).
-There is **no total-byte limit**, so one manager for everything can balloon
-(fulls are MBs, ugoira zips tens of MBs). Mitigation: split managers per
-content class, size the object counts from typical file sizes, keep stale
-periods short for the heavy classes. Starting budgets (tune on device):
+- `PxFileService extends FileService` — downloads through
+  `WebSession.instance.dio` (shared UA/cookie/interceptors), per-URL
+  `CancelToken`s with a request-seq guard so a cancelled download's
+  `finally` can't evict a newer request's token. Scroll-away cancels
+  downloads for free via `addOnLastListenerRemovedCallback`.
+- Three managers, per-class budgets (`Config` has object-count eviction
+  only — NO byte cap — so the split IS the balloon protection):
 
-| Manager key | Content | Typical file | maxObjects | stale | ~Worst case |
-|---|---|---|---|---|---|
-| `px_thumbs` | Grid/strip thumbs (`gridThumbUrl`, ~540px) | ~30 KB | 1000 | 30 d | ~30 MB |
-| `px_fulls` | Detail fulls (`urls.regular`, pages) | ~3 MB | 100 | 7 d | ~300 MB |
-| `px_ugoira` | Ugoira zips (`originalSrc`) | ~20 MB | 10 | 7 d | ~200 MB |
+| Manager | Content | maxObjects | stale | ~Worst case |
+|---|---|---|---|---|
+| `px_thumbs` | Grid/strip thumbs, avatars, precache | 1000 | 30 d | ~30 MB |
+| `px_fulls` | Detail fulls (`urls.regular`, pages) | 100 | 7 d | ~300 MB |
+| `px_ugoira` | Ugoira zips (`originalSrc`) | 30 | 7 d | ~600 MB |
 
-All requests need `Referer: https://www.pixiv.net/` — the manager's
-per-request `headers` / `authHeaders` params cover this (no cookie needed,
-same as today).
+- `PxImageProvider(url, {headers, cacheManager, reloadToken})` — custom
+  `ImageProvider` feeding `DownloadProgress` into standard `ImageChunkEvent`s,
+  so all existing `loadingBuilder`s keep working. Cache hits emit NO
+  progress events (manager returns `FileInfo` directly) — the phantom
+  progress-bar-on-cache-hit class of complaints is gone structurally.
+  `reloadToken` busts the in-memory entry for manual retry (detail
+  fulls show Retry next to the broken-image icon).
+- All requests carry `Referer: https://www.pixiv.net/` (`pxImageHeaders`).
+  No cookie needed for pximg, same as before.
 
-## Stills: what changes
+## Ugoira
 
-- Tiles, strip thumbs, avatars, detail fulls: `NetworkImage`/`ResizeImage` →
-  `cached_network_image` with a per-class `cacheManager` + `httpHeaders`.
-  Its `progressIndicatorBuilder` also covers wishlist "loading progress with
-  text" — print the percent there.
-- `precacheImage` calls (neighbor prefetch, inner-page prefetch) go through
-  the same managers so prefetch warms the same files.
-- Loading placeholders stay as-is; `errorWidget` keeps the current
-  broken-image + retry pattern (wishlist "refetch failed images").
+- The zip is a static file: cache the zip, not the frames.
+  `getSingleFile` → `FileByteSource.open(file.path)` → `Archive.open`.
+  `Archive.close()` closes the owned source; early-exit paths mirror it.
+- `UgoiraSessionStore` (in `ugoira_player.dart`, LRU of 2 entries) keeps
+  decoded frames + meta + totals per illust id. Returning to a disposed
+  ugoira page restores frames without touching the network; partial loads
+  resume from the kept frame count.
+- INVARIANT: a load must never cancel while its page is alive. In-page
+  scrolling is not navigation — the detail viewer sits under a
+  `_ViewerKeepAlive` (`AutomaticKeepAliveClientMixin`) so scrolling to
+  related/strip and back never disposes the player mid-load. (A bare
+  `KeepAlive` widget is WRONG here: ListView's delegate wraps children in
+  a RepaintBoundary and it crashes — see the class comment.)
+  Swipe-away cancel (active flips) is still by design.
 
-## Ugoira: how the hell we cache it
+## API responses (`lib/api_cache.dart`, Hive box `pixiv_api`)
 
-The zip is a static file, so cache the zip, not the frames:
+- Immutable (7 d TTL): `illustDetail`, `illustPages`, `ugoiraMeta`.
+- Artist-scoped (1 h TTL): `userFull`, `userWorksAll`, `userProfileWorks`
+  chunks (keyed by user + category + length + head/tail ids).
+- NEVER cached: discovery/related/ranking/search (live samples),
+  CSRF/bookmark calls. No manual invalidation in v1 — TTLs only.
 
-1. `await pxUgoiraManager.getSingleFile(zipUrl, headers: refererHeaders)` —
-   downloads once, returns the cached `File`.
-2. `Archive.open(await FileByteSource.open(file.path))` instead of today's
-   `HttpRangeByteSource.open(zipUrl)`. Both verified to exist in
-   koni_archive 0.9.0 / koni_archive_core 0.9.0 (`Archive.openBytes` over
-   `MemoryByteSource` also exists if file I/O ever misbehaves).
-3. `Archive.close()` already closes the owned source — the player's existing
-   dispose path keeps working; mirror the early-exit `source.close()` calls
-   for `FileByteSource` on cancelled loads.
-4. Decoded frames stay memory-only per player session (as today); disk holds
-   only the zip. Do NOT cache individual frames to disk.
+## Traps for future agents
 
-## Non-goals / traps
+- Don't add a fourth manager or share one across classes.
+- Decode failures evict the memory entry but KEEP the disk file (a corrupt
+  download would otherwise loop forever; `removeFile` on error was tried
+  in niggabooru and risks exactly that).
+- Web platform has a separate `Config` impl; this app doesn't target web.
+- Ugoira zips are the balloon risk: drop `px_ugoira` stale to 3 d before
+  touching anything else.
 
-- Don't add a fourth manager or share one across classes — the whole point
-  is per-class budgets.
-- Web platform has a separate `Config` impl; this app doesn't target web,
-  don't contort the plan for it.
-- `leaf_widgets` has no cache deps (checked); the managers live in this app,
-  e.g. `lib/px_cache.dart` (flat layout, like `web_session.dart`).
-- Ugoira zips are the balloon risk: if 10 objects still hurts, drop
-  `px_ugoira` stale to 3 d before touching anything else.
+## Not built (proposed, not approved)
+
+- Cache stats + clear UI (niggabooru-style live MB readout in settings).
+  Visibility complement to the per-class budgets, not a replacement.
+  Needs user greenlight before adding the settings surface.

@@ -3,6 +3,7 @@ import 'package:waterfall_flow/waterfall_flow.dart';
 
 import 'artist_context.dart';
 import 'detail_screen.dart';
+import 'api_cache.dart';
 import 'feed_screen.dart';
 import 'web/pixiv_web_models.dart';
 import 'web_session.dart';
@@ -26,13 +27,19 @@ class ArtistScreen extends StatefulWidget {
 }
 
 class _ArtistScreenState extends State<ArtistScreen> {
+  static const _chunkSize = 48;
+
   WebUserFull? _user;
   bool _userFailed = false;
   List<WebDiscoveryIllust> _works = [];
   List<String> _orderIds = [];
+  List<String> _allIllustIds = [];
+  List<String> _allMangaIds = [];
+  List<String> _pendingIds = [];
   int _illustCount = 0;
   int _mangaCount = 0;
   bool _worksLoading = true;
+  bool _loadingMore = false;
   String? _worksFailure;
 
   @override
@@ -44,7 +51,7 @@ class _ArtistScreenState extends State<ArtistScreen> {
 
   Future<void> _fetchUser() async {
     try {
-      final user = (await WebSession.instance.client.userFull(widget.userId)).body;
+      final user = (await ApiCache.instance.userFull(widget.userId)).body;
       if (!mounted) return;
       setState(() => _user = user);
     } catch (e, stack) {
@@ -54,47 +61,61 @@ class _ArtistScreenState extends State<ArtistScreen> {
     }
   }
 
+  Future<Map<String, WebDiscoveryIllust>> _hydrateChunk(
+    String userId,
+    List<String> ids,
+    List<String> illustIds,
+    List<String> mangaIds,
+  ) async {
+    final illustChunk = ids.where(illustIds.contains).toList();
+    final mangaChunk = ids.where(mangaIds.contains).toList();
+    final results = await Future.wait([
+      illustChunk.isEmpty
+          ? Future.value(
+              WebUserProfileWorksResponse(false, body: WebUserProfileWorksBody()),
+            )
+          : ApiCache.instance.userProfileWorks(userId, illustChunk),
+      mangaChunk.isEmpty
+          ? Future.value(
+              WebUserProfileWorksResponse(false, body: WebUserProfileWorksBody()),
+            )
+          : ApiCache.instance.userProfileWorks(
+              userId,
+              mangaChunk,
+              workCategory: 'manga',
+            ),
+    ]);
+    return <String, WebDiscoveryIllust>{
+      ...(results[0] as WebUserProfileWorksResponse).body.works,
+      ...(results[1] as WebUserProfileWorksResponse).body.works,
+    };
+  }
+
   Future<void> _fetchWorks() async {
     final userId = widget.userId;
     try {
-      final all = (await WebSession.instance.client.userWorksAll(userId)).body;
+      final all = (await ApiCache.instance.userWorksAll(userId)).body;
       if (!mounted) return;
       final illustIds = all.illustIds;
       final mangaIds = all.mangaIds;
+      final order = [...illustIds, ...mangaIds]
+        ..sort((a, b) => _numericId(b).compareTo(_numericId(a)));
       setState(() {
+        _allIllustIds = illustIds;
+        _allMangaIds = mangaIds;
         _illustCount = illustIds.length;
         _mangaCount = mangaIds.length;
+        _pendingIds = order.sublist(_chunkSize.clamp(0, order.length));
       });
-      final results2 = await Future.wait([
-        illustIds.isEmpty
-            ? Future.value(
-                WebUserProfileWorksResponse(false, body: WebUserProfileWorksBody()),
-              )
-            : WebSession.instance.client.userProfileWorks(userId, illustIds),
-        mangaIds.isEmpty
-            ? Future.value(
-                WebUserProfileWorksResponse(false, body: WebUserProfileWorksBody()),
-              )
-            : WebSession.instance.client.userProfileWorks(
-                userId,
-                mangaIds,
-                workCategory: 'manga',
-              ),
-      ]);
+      final first = order.take(_chunkSize).toList();
+      final byId = await _hydrateChunk(userId, first, illustIds, mangaIds);
       if (!mounted) return;
-      final worksById = <String, WebDiscoveryIllust>{
-        ...(results2[0] as WebUserProfileWorksResponse).body.works,
-        ...(results2[1] as WebUserProfileWorksResponse).body.works,
-      };
-      final works = [
-        for (final id in [...illustIds, ...mangaIds])
-          if (worksById[id] != null) worksById[id]!,
-      ]..sort((a, b) => _numericId(b.id).compareTo(_numericId(a.id)));
       setState(() {
-        _works = works;
-        _orderIds = [for (final w in works) w.id];
+        _works = [for (final id in first) if (byId[id] != null) byId[id]!];
+        _orderIds = [for (final w in _works) w.id];
         _worksLoading = false;
       });
+      if (_pendingIds.isNotEmpty) _loadMoreChunk();
     } catch (e, stack) {
       debugPrint('artist works failed $userId: $e\n$stack');
       if (!mounted) return;
@@ -102,6 +123,27 @@ class _ArtistScreenState extends State<ArtistScreen> {
         _worksLoading = false;
         _worksFailure = e.toString();
       });
+    }
+  }
+
+  Future<void> _loadMoreChunk() async {
+    if (_loadingMore || _pendingIds.isEmpty) return;
+    final userId = widget.userId;
+    setState(() => _loadingMore = true);
+    try {
+      final chunk = _pendingIds.take(_chunkSize).toList();
+      final byId = await _hydrateChunk(userId, chunk, _allIllustIds, _allMangaIds);
+      if (!mounted) return;
+      setState(() {
+        _works = [..._works, for (final id in chunk) if (byId[id] != null) byId[id]!];
+        _orderIds = [for (final w in _works) w.id];
+        _pendingIds = _pendingIds.skip(chunk.length).toList();
+        _loadingMore = false;
+      });
+    } catch (e, stack) {
+      debugPrint('artist chunk failed $userId: $e\n$stack');
+      if (!mounted) return;
+      setState(() => _loadingMore = false);
     }
   }
 
@@ -161,13 +203,17 @@ class _ArtistScreenState extends State<ArtistScreen> {
         slivers: [
           SliverAppBar(
             pinned: true,
-            expandedHeight: 200,
+            expandedHeight: 168,
             leading: const BackButton(),
             flexibleSpace: FlexibleSpaceBar(
-              title: Text(_displayName, overflow: TextOverflow.ellipsis),
-              titlePadding: const EdgeInsetsDirectional.only(start: 56, bottom: 16),
+              title: Text(
+                _displayName,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+              ),
+              titlePadding: const EdgeInsetsDirectional.only(start: 56, bottom: 14),
               background: Padding(
-                padding: const EdgeInsets.fromLTRB(16, 76, 16, 56),
+                padding: const EdgeInsets.fromLTRB(16, 64, 16, 50),
                 child: _headerBody(scheme),
               ),
             ),
@@ -192,9 +238,9 @@ class _ArtistScreenState extends State<ArtistScreen> {
                   padding: const EdgeInsets.all(24),
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
+                    spacing: 8,
                     children: [
                       Text(_worksFailure!),
-                      const SizedBox(height: 8),
                       FilledButton(onPressed: _retryWorks, child: const Text('Retry')),
                     ],
                   ),
@@ -218,11 +264,33 @@ class _ArtistScreenState extends State<ArtistScreen> {
                   mainAxisSpacing: 4,
                 ),
                 delegate: SliverChildBuilderDelegate(
-                  (context, index) => FeedTile(
-                    illust: _works[index],
-                    onTap: () => _openWork(index),
-                  ),
-                  childCount: _works.length,
+                  (context, index) {
+                    if (index == _works.length) {
+                      if (_pendingIds.isEmpty) return const SizedBox.shrink();
+                      if (_loadingMore) {
+                        return const Center(
+                          child: Padding(
+                            padding: EdgeInsets.all(12),
+                            child: CircularProgressIndicator(),
+                          ),
+                        );
+                      }
+                      return Center(
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 8),
+                          child: OutlinedButton(
+                            onPressed: _loadMoreChunk,
+                            child: Text('Load more (${_works.length} of ${_illustCount + _mangaCount})'),
+                          ),
+                        ),
+                      );
+                    }
+                    return FeedTile(
+                      illust: _works[index],
+                      onTap: () => _openWork(index),
+                    );
+                  },
+                  childCount: _works.length + 1,
                 ),
               ),
             ),
@@ -237,9 +305,9 @@ class _ArtistScreenState extends State<ArtistScreen> {
       final knownTotal = _illustCount + _mangaCount;
       return Row(
         crossAxisAlignment: CrossAxisAlignment.center,
+        spacing: 12,
         children: [
           ArtistAvatar(url: _avatarUrl, radius: 28),
-          const SizedBox(width: 12),
           Expanded(
             child: Text(
               knownTotal > 0
@@ -296,13 +364,13 @@ class _ArtistScreenState extends State<ArtistScreen> {
       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
       child: Column(
         mainAxisSize: MainAxisSize.min,
+        spacing: 12,
         children: [
           const SizedBox(
             width: 28,
             height: 28,
             child: CircularProgressIndicator(strokeWidth: 3),
           ),
-          const SizedBox(height: 12),
           Text(
             total > 0 ? 'Loading $total works…' : 'Loading works…',
             style: TextStyle(fontSize: 13, color: scheme.onSurfaceVariant),

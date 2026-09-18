@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'px_cache.dart';
+
 const artistImageHeaders = {'Referer': 'https://www.pixiv.net/'};
 
 class ArtistContext {
@@ -29,7 +31,11 @@ class ArtistAvatar extends StatelessWidget {
       backgroundColor: Theme.of(context).colorScheme.surfaceContainerHighest,
       backgroundImage: url.isEmpty
           ? null
-          : NetworkImage(url, headers: artistImageHeaders),
+          : PxImageProvider(
+              url,
+              headers: artistImageHeaders,
+              cacheManager: PxCache.instance.thumbs,
+            ),
       onBackgroundImageError: (_, _) {},
       child: url.isEmpty ? Icon(Icons.person, size: radius) : null,
     );

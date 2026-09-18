@@ -1,10 +1,14 @@
+import 'package:extended_tabs/extended_tabs.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
+import 'api_cache.dart';
 import 'artist_context.dart';
 import 'artist_screen.dart';
 import 'detail_page.dart';
 import 'feed_screen.dart';
+import 'px_cache.dart';
 import 'web/pixiv_web_models.dart';
 
 class DetailScreen extends StatefulWidget {
@@ -18,9 +22,30 @@ class DetailScreen extends StatefulWidget {
   State<DetailScreen> createState() => _DetailScreenState();
 }
 
+/// Release velocity for the outer hold controller when an inner edge-drag
+/// ends. Past ~12% of a page toward the neighbour the push commits with a
+/// guaranteed fling (keeps the old eager feel for deliberate pushes);
+/// below that the real finger velocity passes through and the framework's
+/// own page-snapping decides — exactly like a plain PageView. Assumes
+/// viewportFraction 1.0, i.e. page i sits at i * viewport.
+double resolveEndVelocity({
+  required double pixels,
+  required double pageOrigin,
+  required double viewport,
+  required double fingerVelocity,
+}) {
+  if (viewport > 0) {
+    final progress = (pixels - pageOrigin) / viewport;
+    if (progress > 0.12) return -1600;
+    if (progress < -0.12) return 1600;
+  }
+  return fingerVelocity;
+}
+
 class _DetailScreenState extends State<DetailScreen> {
   late final PageController _controller;
   late int _current;
+  Drag? _outerHold;
 
   @override
   void initState() {
@@ -34,6 +59,7 @@ class _DetailScreenState extends State<DetailScreen> {
 
   @override
   void dispose() {
+    _endOuterHold();
     _controller.dispose();
     super.dispose();
   }
@@ -41,15 +67,23 @@ class _DetailScreenState extends State<DetailScreen> {
   void _precacheNeighbors(int index) {
     for (final next in [index - 1, index + 1]) {
       if (next < 0 || next >= widget.items.length) continue;
-      final url = gridThumbUrl(widget.items[next]);
-      if (url.isEmpty) continue;
-      precacheImage(
-        NetworkImage(url, headers: imageHeaders),
-        context,
-        onError: (error, stackTrace) {
-          debugPrint('precache failed $url: $error');
-        },
-      );
+      final item = widget.items[next];
+      final url = gridThumbUrl(item);
+      if (url.isNotEmpty) {
+        precacheImage(
+          PxImageProvider(url, headers: imageHeaders, cacheManager: PxCache.instance.thumbs),
+          context,
+          onError: (error, stackTrace) {
+            debugPrint('precache failed $url: $error');
+          },
+        );
+      }
+      ApiCache.instance.illustDetail(item.id).then((_) {}, onError: (e) {
+        debugPrint('prefetch detail failed ${item.id}: $e');
+      });
+      ApiCache.instance.illustPages(item.id).then((_) {}, onError: (e) {
+        debugPrint('prefetch pages failed ${item.id}: $e');
+      });
     }
   }
 
@@ -108,9 +142,9 @@ class _DetailScreenState extends State<DetailScreen> {
           child: Padding(
             padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 4),
             child: Row(
+              spacing: 8,
               children: [
                 ArtistAvatar(url: avatarUrl, radius: 16),
-                const SizedBox(width: 8),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -149,7 +183,10 @@ class _DetailScreenState extends State<DetailScreen> {
           ),
         ],
       ),
-      body: PageView.builder(
+      body: ExtendedPageView.builder(
+        // Stays hittable mid-animation (framework PageView ignores pointer
+        // while driven, which used to route inner grabs to the outer here).
+        shouldIgnorePointerWhenScrolling: false,
         physics: const SnappyPagePhysics(),
         controller: _controller,
         itemCount: widget.items.length,
@@ -160,7 +197,9 @@ class _DetailScreenState extends State<DetailScreen> {
         itemBuilder: (context, index) => DetailPage(
           key: ValueKey(widget.items[index].id),
           illust: widget.items[index],
-          onInnerEdge: _onInnerEdge,
+          onInnerDragStart: _onInnerDragStart,
+          onInnerDragUpdate: _onInnerDragUpdate,
+          onInnerDragEnd: _onInnerDragEnd,
           active: index == _current,
           preload: (index - _current).abs() == 1,
           artist: artist,
@@ -169,11 +208,62 @@ class _DetailScreenState extends State<DetailScreen> {
     );
   }
 
-  void _onInnerEdge(int direction) {
-    if (direction > 0) {
-      _controller.nextPage(duration: const Duration(milliseconds: 100), curve: Curves.easeOut);
-    } else {
-      _controller.previousPage(duration: const Duration(milliseconds: 100), curve: Curves.easeOut);
-    }
+  // Nested-pager handoff, done with the framework instead of against it.
+  //
+  // jumpTo is the WRONG primitive here: it ends with goBallistic(null) and
+  // PageScrollPhysics turns a zero-velocity ballistic into a spring back to
+  // the nearest page — the outer visibly fights the thumb during holds.
+  // Instead the outer position is put into a real held-drag activity while
+  // the inner pushes past its edge: no spring while held, and on release the
+  // framework's own page-snapping settles with the finger's velocity.
+  //
+  // The hold is created LAZILY on the first edge excess, not on drag start:
+  // an eager hold would freeze an in-flight outer settle for the whole inner
+  // drag even when the inner never reaches its edge.
+  void _onInnerDragStart() {
+    if (!mounted || !_controller.hasClients) return;
+    _endOuterHold();
+  }
+
+  void _onInnerDragUpdate(double excess) {
+    if (!_controller.hasClients || excess == 0) return;
+    final hold = _outerHold ??=
+        _controller.position.drag(DragStartDetails(), () {});
+    // Positive overscroll = pushing past the inner trailing edge = moving
+    // toward the next post. ScrollDragController consumes primaryDelta with
+    // the pointer-motion sign (a forward push moves the finger in -x), so
+    // the excess is negated to produce increasing outer pixels.
+    hold.update(
+      DragUpdateDetails(
+        globalPosition: Offset.zero,
+        delta: Offset(-excess, 0),
+        primaryDelta: -excess,
+      ),
+    );
+  }
+
+  void _onInnerDragEnd(double velocity) {
+    final hold = _outerHold;
+    _outerHold = null;
+    if (hold == null || !_controller.hasClients) return;
+    final position = _controller.position;
+    final endVelocity = resolveEndVelocity(
+      pixels: position.pixels,
+      pageOrigin: _current * position.viewportDimension,
+      viewport: position.viewportDimension,
+      fingerVelocity: velocity,
+    );
+    hold.end(
+      DragEndDetails(
+        primaryVelocity: endVelocity,
+        velocity: Velocity(pixelsPerSecond: Offset(endVelocity, 0)),
+      ),
+    );
+  }
+
+  void _endOuterHold() {
+    final hold = _outerHold;
+    _outerHold = null;
+    hold?.cancel();
   }
 }
