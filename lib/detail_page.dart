@@ -47,7 +47,16 @@ class DetailPage extends StatefulWidget {
   final bool preload;
   final ArtistContext? artist;
 
-  const DetailPage({super.key, required this.illust, this.onInnerDragStart, this.onInnerDragUpdate, this.onInnerDragEnd, this.active = true, this.preload = false, this.artist});
+  const DetailPage({
+    super.key,
+    required this.illust,
+    this.onInnerDragStart,
+    this.onInnerDragUpdate,
+    this.onInnerDragEnd,
+    this.active = true,
+    this.preload = false,
+    this.artist,
+  });
 
   @override
   State<DetailPage> createState() => _DetailPageState();
@@ -153,8 +162,7 @@ class _DetailPageState extends State<DetailPage> with AutomaticKeepAliveClientMi
       if (!mounted) return;
       final illustIds = all.illustIds;
       final mangaIds = all.mangaIds;
-      final order = [...illustIds, ...mangaIds]
-        ..sort((a, b) => (int.tryParse(b) ?? -1).compareTo(int.tryParse(a) ?? -1));
+      final order = [...illustIds, ...mangaIds]..sort((a, b) => (int.tryParse(b) ?? -1).compareTo(int.tryParse(a) ?? -1));
       final currentId = widget.illust.id;
       final currentIndex = order.indexOf(currentId);
       final windowIds = <String>{};
@@ -173,7 +181,10 @@ class _DetailPageState extends State<DetailPage> with AutomaticKeepAliveClientMi
       setState(() {
         _artistOrder = order;
         _artistIndex = currentIndex;
-        _artistWorks = [for (final id in order) if (byId[id] != null) byId[id]!];
+        _artistWorks = [
+          for (final id in order)
+            if (byId[id] != null) byId[id]!,
+        ];
         _artistLoading = false;
       });
       try {
@@ -193,12 +204,7 @@ class _DetailPageState extends State<DetailPage> with AutomaticKeepAliveClientMi
     }
   }
 
-  Future<Map<String, WebDiscoveryIllust>> _hydrateIds(
-    String userId,
-    Set<String> ids,
-    List<String> illustIds,
-    List<String> mangaIds,
-  ) async {
+  Future<Map<String, WebDiscoveryIllust>> _hydrateIds(String userId, Set<String> ids, List<String> illustIds, List<String> mangaIds) async {
     final windowIllustIds = ids.where(illustIds.contains).toList();
     final windowMangaIds = ids.where(mangaIds.contains).toList();
     final hydrated = await Future.wait([
@@ -219,8 +225,7 @@ class _DetailPageState extends State<DetailPage> with AutomaticKeepAliveClientMi
     final seen = {for (final w in _artistWorks) w.id};
     final merged = [
       for (final id in _artistOrder)
-        if (byId[id] != null || seen.contains(id))
-          byId[id] ?? _artistWorks.firstWhere((w) => w.id == id),
+        if (byId[id] != null || seen.contains(id)) byId[id] ?? _artistWorks.firstWhere((w) => w.id == id),
     ];
     setState(() => _artistWorks = merged);
   }
@@ -267,10 +272,7 @@ class _DetailPageState extends State<DetailPage> with AutomaticKeepAliveClientMi
     try {
       final byId = await _hydrateIds(userId, ids, _rangeIllustIds, _rangeMangaIds);
       if (!mounted) return;
-      final merged = <String, WebDiscoveryIllust>{
-        for (final w in _artistWorks) w.id: w,
-        ...byId,
-      };
+      final merged = <String, WebDiscoveryIllust>{for (final w in _artistWorks) w.id: w, ...byId};
       setState(() {
         _extending = false;
         _extendingOlder = false;
@@ -285,6 +287,7 @@ class _DetailPageState extends State<DetailPage> with AutomaticKeepAliveClientMi
       });
     }
   }
+
   void _openArtist() {
     final userId = _detail?.userId ?? widget.illust.userId;
     if (userId == null || userId.isEmpty) return;
@@ -487,10 +490,7 @@ class _DetailPageState extends State<DetailPage> with AutomaticKeepAliveClientMi
               mainAxisSize: MainAxisSize.min,
               children: [
                 const Icon(Icons.broken_image),
-                TextButton(
-                  onPressed: () => setState(() => _reloadTokens[url] = token + 1),
-                  child: const Text('Retry'),
-                ),
+                TextButton(onPressed: () => setState(() => _reloadTokens[url] = token + 1), child: const Text('Retry')),
               ],
             ),
           );
@@ -520,9 +520,7 @@ class _DetailPageState extends State<DetailPage> with AutomaticKeepAliveClientMi
             defaultTargetPlatform == TargetPlatform.macOS);
     return LayoutBuilder(
       builder: (context, constraints) {
-        final viewWidth = constraints.maxWidth.isFinite
-            ? constraints.maxWidth
-            : MediaQuery.of(context).size.width;
+        final viewWidth = constraints.maxWidth.isFinite ? constraints.maxWidth : MediaQuery.of(context).size.width;
         final cap = _viewerCap(context);
         final heights = <double>[];
         final contained = <bool>[];
@@ -556,9 +554,7 @@ class _DetailPageState extends State<DetailPage> with AutomaticKeepAliveClientMi
                       } else if (notification is ScrollEndNotification) {
                         if (_dragging) {
                           _dragging = false;
-                          widget.onInnerDragEnd?.call(
-                            notification.dragDetails?.primaryVelocity ?? 0,
-                          );
+                          widget.onInnerDragEnd?.call(notification.dragDetails?.primaryVelocity ?? 0);
                         }
                       }
                       return false;
@@ -579,11 +575,7 @@ class _DetailPageState extends State<DetailPage> with AutomaticKeepAliveClientMi
                           width: viewWidth,
                           height: heights[index],
                           child: contained[index]
-                              ? _stillImage(
-                                  pages[index].url,
-                                  fit: BoxFit.contain,
-                                  alignment: Alignment.center,
-                                )
+                              ? _stillImage(pages[index].url, fit: BoxFit.contain, alignment: Alignment.center)
                               : _stillImage(pages[index].url),
                         ),
                       ),
@@ -597,10 +589,7 @@ class _DetailPageState extends State<DetailPage> with AutomaticKeepAliveClientMi
                       child: Center(
                         child: _NavChevron(
                           icon: Icons.chevron_left,
-                          onTap: () => controller.previousPage(
-                            duration: const Duration(milliseconds: 250),
-                            curve: Curves.easeOut,
-                          ),
+                          onTap: () => controller.previousPage(duration: const Duration(milliseconds: 250), curve: Curves.easeOut),
                         ),
                       ),
                     ),
@@ -612,10 +601,7 @@ class _DetailPageState extends State<DetailPage> with AutomaticKeepAliveClientMi
                       child: Center(
                         child: _NavChevron(
                           icon: Icons.chevron_right,
-                          onTap: () => controller.nextPage(
-                            duration: const Duration(milliseconds: 250),
-                            curve: Curves.easeOut,
-                          ),
+                          onTap: () => controller.nextPage(duration: const Duration(milliseconds: 250), curve: Curves.easeOut),
                         ),
                       ),
                     ),
@@ -633,18 +619,11 @@ class _DetailPageState extends State<DetailPage> with AutomaticKeepAliveClientMi
                             children: [
                               for (var i = 0; i < pages.length; i++)
                                 GestureDetector(
-                                  onTap: () => controller.animateToPage(
-                                    i,
-                                    duration: const Duration(milliseconds: 250),
-                                    curve: Curves.easeOut,
-                                  ),
+                                  onTap: () =>
+                                      controller.animateToPage(i, duration: const Duration(milliseconds: 250), curve: Curves.easeOut),
                                   child: Padding(
                                     padding: const EdgeInsets.symmetric(horizontal: 3),
-                                    child: Icon(
-                                      Icons.circle,
-                                      size: 8,
-                                      color: i == _innerIndex ? Colors.white : Colors.white38,
-                                    ),
+                                    child: Icon(Icons.circle, size: 8, color: i == _innerIndex ? Colors.white : Colors.white38),
                                   ),
                                 ),
                             ],
@@ -652,12 +631,7 @@ class _DetailPageState extends State<DetailPage> with AutomaticKeepAliveClientMi
                         ),
                       ),
                     ),
-                  if (_chromeVisible)
-                    Positioned(
-                      bottom: 8,
-                      right: 8,
-                      child: TileBadge('${_innerIndex + 1} / ${pages.length}'),
-                    ),
+                  if (_chromeVisible) Positioned(bottom: 8, right: 8, child: TileBadge('${_innerIndex + 1} / ${pages.length}')),
                 ],
               ),
             );
@@ -777,25 +751,34 @@ class _DetailPageState extends State<DetailPage> with AutomaticKeepAliveClientMi
         final reversed = WebSession.instance.reverseDetails.value;
         final info = Padding(
           padding: const EdgeInsets.all(12),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: reversed ? infoChildren.reversed.toList() : infoChildren,
-          ),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: reversed ? infoChildren.reversed.toList() : infoChildren),
         );
         if (!reversed) {
           return ListView(
-            children: [_ViewerKeepAlive(child: viewer), info, _artistStrip(false), _relatedSection(false)],
+            children: [
+              _ViewerKeepAlive(child: viewer),
+              info,
+              _artistStrip(),
+              _relatedSection(false),
+            ],
           );
         }
         return ListView(
           reverse: true,
-          children: [_ViewerKeepAlive(child: viewer), info, _artistStrip(true), _relatedSection(true)],
+          children: [
+            _ViewerKeepAlive(child: viewer),
+            info,
+            _artistStrip(),
+            _relatedSection(true),
+          ],
         );
       },
     );
   }
 
-  Widget _artistStrip(bool reversed) {
+  // The strip keeps its top-down order in both modes: it is short enough
+  // that reversing it buys nothing.
+  Widget _artistStrip() {
     if (widget.artist != null) return const SizedBox.shrink();
     if (_artistLoading && _artistWorks.isEmpty) {
       return const Padding(
@@ -812,10 +795,7 @@ class _DetailPageState extends State<DetailPage> with AutomaticKeepAliveClientMi
           child: Row(
             children: [
               Expanded(
-                child: Text(
-                  'Artist works failed to load',
-                  style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.error),
-                ),
+                child: Text('Artist works failed to load', style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.error)),
               ),
               TextButton(onPressed: _fetchAuthor, child: const Text('Retry')),
             ],
@@ -825,8 +805,7 @@ class _DetailPageState extends State<DetailPage> with AutomaticKeepAliveClientMi
       return const SizedBox.shrink();
     }
     final prevId = _artistIndex > 0 ? _artistOrder[_artistIndex - 1] : null;
-    final nextId =
-        _artistIndex >= 0 && _artistIndex + 1 < _artistOrder.length ? _artistOrder[_artistIndex + 1] : null;
+    final nextId = _artistIndex >= 0 && _artistIndex + 1 < _artistOrder.length ? _artistOrder[_artistIndex + 1] : null;
     final header = Row(
       children: [
         Expanded(
@@ -835,21 +814,12 @@ class _DetailPageState extends State<DetailPage> with AutomaticKeepAliveClientMi
             onTap: _openArtist,
             child: const Padding(
               padding: EdgeInsets.symmetric(vertical: 4),
-              child: Text('More from this artist',
-                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+              child: Text('More from this artist', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
             ),
           ),
         ),
-        if (prevId != null)
-          TextButton(
-            onPressed: _extending ? null : () => _openNeighbour(-1),
-            child: const Text('‹ Prev'),
-          ),
-        if (nextId != null)
-          TextButton(
-            onPressed: _extending ? null : () => _openNeighbour(1),
-            child: const Text('Next ›'),
-          ),
+        if (prevId != null) TextButton(onPressed: _extending ? null : () => _openNeighbour(-1), child: const Text('‹ Prev')),
+        if (nextId != null) TextButton(onPressed: _extending ? null : () => _openNeighbour(1), child: const Text('Next ›')),
       ],
     );
     final lo = _hydratedLo;
@@ -911,11 +881,7 @@ class _DetailPageState extends State<DetailPage> with AutomaticKeepAliveClientMi
     );
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        spacing: 4,
-        children: reversed ? [thumbs, header] : [header, thumbs],
-      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, spacing: 4, children: [header, thumbs]),
     );
   }
 
@@ -931,24 +897,14 @@ class _DetailPageState extends State<DetailPage> with AutomaticKeepAliveClientMi
             onTap: _extending ? null : () => _extendStrip(older: !newer),
             child: Center(
               child: loading
-                  ? const SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
+                  ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
                   : Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         Icon(newer ? Icons.arrow_back : Icons.arrow_forward, size: 20),
                         const SizedBox(height: 2),
-                        Text(
-                          '+$count',
-                          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
-                        ),
-                        Text(
-                          newer ? 'newer' : 'older',
-                          style: const TextStyle(fontSize: 11),
-                        ),
+                        Text('+$count', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                        Text(newer ? 'newer' : 'older', style: const TextStyle(fontSize: 11)),
                       ],
                     ),
             ),
@@ -968,7 +924,9 @@ class _DetailPageState extends State<DetailPage> with AutomaticKeepAliveClientMi
   }
 
   Widget _relatedSection(bool reversed) {
-    const header = Text('Related', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700));
+    const header = Center(
+      child: Text('Related', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+    );
     final Widget content;
     if (_related.isEmpty && _relatedLoading) {
       content = const Center(
@@ -991,6 +949,7 @@ class _DetailPageState extends State<DetailPage> with AutomaticKeepAliveClientMi
       content = WaterfallFlow.builder(
         shrinkWrap: true,
         physics: const NeverScrollableScrollPhysics(),
+        reverse: reversed,
         gridDelegate: const SliverWaterfallFlowDelegateWithMaxCrossAxisExtent(
           maxCrossAxisExtent: 160,
           crossAxisSpacing: 4,
@@ -998,8 +957,12 @@ class _DetailPageState extends State<DetailPage> with AutomaticKeepAliveClientMi
         ),
         itemCount: _related.length,
         itemBuilder: (context, index) {
-          final i = reversed ? _related.length - 1 - index : index;
-          return FeedTile(illust: _related[i], onTap: () => _openRelated(i));
+          // No index flip here: builder positions must stay stable across
+          // Load-more appends, or every visible tile re-maps and the grid
+          // visibly reshuffles under the finger. Appends land at the top
+          // builders, right under the button, and existing tiles keep
+          // their offsets. Most-relevant stays nearest the title below.
+          return FeedTile(illust: _related[index], onTap: () => _openRelated(index));
         },
       );
     }
@@ -1033,13 +996,29 @@ class _DetailPageState extends State<DetailPage> with AutomaticKeepAliveClientMi
     } else {
       footer = const SizedBox.shrink();
     }
+    final scheme = Theme.of(context).colorScheme;
+    final zoneColor = Theme.of(context).brightness == Brightness.dark ? scheme.surfaceContainerHigh : scheme.surfaceContainerLow;
     return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 4, 12, 16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: reversed
-            ? [footer, content, const SizedBox(height: 8), header]
-            : [header, const SizedBox(height: 8), content, footer],
+      padding: const EdgeInsets.only(top: 4, bottom: 16),
+      child: Container(
+        decoration: BoxDecoration(color: zoneColor, borderRadius: BorderRadius.circular(12)),
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            // Reverse mode reads bottom-up: title first at the entry,
+            // then the grid, then the action at the far end where the
+            // scroll — and the appended items — end up.
+            children: reversed
+                ? [
+                    if (footer is! SizedBox) footer,
+                    content,
+                    const SizedBox(height: 8),
+                    header,
+                  ]
+                : [header, const SizedBox(height: 8), content, footer],
+          ),
+        ),
       ),
     );
   }
@@ -1076,7 +1055,8 @@ class _ViewerKeepAliveState extends State<_ViewerKeepAlive> with AutomaticKeepAl
   }
 }
 
-class _NavChevron extends StatelessWidget {  final IconData icon;
+class _NavChevron extends StatelessWidget {
+  final IconData icon;
   final VoidCallback onTap;
 
   const _NavChevron({required this.icon, required this.onTap});

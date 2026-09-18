@@ -8,6 +8,23 @@ import 'web_session.dart';
 const apiImmutableTtl = Duration(days: 7);
 const apiArtistTtl = Duration(hours: 1);
 
+/// Re-keys a Hive-read tree to String maps throughout. Hive deserializes
+/// every stored map as Map<dynamic, dynamic>, but dart_mappable's generated
+/// decoders type-check nested values as Map<String, dynamic> — so a shallow
+/// `Map.from` on the top level still explodes one level down. Fresh network
+/// payloads never hit this (jsonDecode already keys everything with String),
+/// which is why only cached reads failed.
+dynamic deepStringKeys(dynamic value) {
+  if (value is Map) {
+    return {
+      for (final entry in value.entries)
+        entry.key.toString(): deepStringKeys(entry.value),
+    };
+  }
+  if (value is List) return [for (final item in value) deepStringKeys(item)];
+  return value;
+}
+
 class ApiCache {
   static final ApiCache instance = ApiCache._();
   ApiCache._();
@@ -34,7 +51,7 @@ class ApiCache {
       final data = raw['data'];
       if (at is int && data is Map && now - at < ttl.inMilliseconds) {
         try {
-          return decode(Map<String, dynamic>.from(data));
+          return decode(Map<String, dynamic>.from(deepStringKeys(data) as Map));
         } catch (e, stack) {
           debugPrint('api cache decode failed $key: $e\n$stack');
         }

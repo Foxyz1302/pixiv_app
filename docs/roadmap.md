@@ -54,7 +54,7 @@ rule: a problem the user stops mentioning is fixed — mark it off.
 - Zoom removed for now (pinch kept losing the gesture arena to pagers;
   reintroduce recognizer-level, not physics toggles).
 - Cookie auth: paste-once PHPSESSID in settings, jar auto-persists Set-Cookie re-issues (sliding ~30d). Plain hive_ce string, no secure storage (personal app, browse-only).
-- Bottom-focus experiment: details list reversible (`reverseDetails` persisted signal, Display dialog toggle) — artwork pinned to the bottom, info/strip/related scroll upward. Default off; evaluate one-handed feel before expanding.
+- Bottom-focus experiment: details list reversible (`reverseDetails` persisted signal, Display dialog toggle) — artwork pinned to the bottom, info/strip/related scroll upward, a custom bottom bar replaces the AppBar (never host an AppBar widget in `bottomNavigationBar` — it zeroes the Scaffold body); strip keeps top-down order (too short to reverse). Related zone sits in a tinted full-bleed card (both modes). Default off; evaluate one-handed feel before expanding.
 
 ## 0.1.1 polish (mirrored from git-ignored `docs/wishlist.md`)
 
@@ -69,19 +69,15 @@ rule: a problem the user stops mentioning is fixed — mark it off.
 
 ## Research queue
 
-- [ ] Inner mid-animation grab routes to outer (OPEN bug, under
-  investigation). CONFIRMED in source: `DrivenScrollActivity.shouldIgnorePointer`
-  is true, applied via `setIgnorePointer` on activity change — dots/chevron
-  `animateToPage` windows (250ms) are the suspects. CONTRADICTION locked in
-  `test/inner_edge_drag_test.dart` ("mid-driven grab reaches inner"): headless,
-  the grab tracks on inner with outer static.
-  INTERVENTION (device-verified): both pagers are now
-  `ExtendedPageView` (`extended_tabs` dep) with
-  `shouldIgnorePointerWhenScrolling: false` — the packaged version of the
-  `setIgnorePointer` no-op. Feels like one pager that occasionally switches
-  posts. Follow-up: the outer hold is created lazily on first edge excess —
-  an eager hold froze in-flight outer settles for whole mid-list inner drags.
-  AWAITING VERDICT on the lazy hold.
+- [x] Inner mid-animation grab routes to outer (FIXED via `ExtendedPageView`
+  `shouldIgnorePointerWhenScrolling: false`; feels like one pager that
+  occasionally switches posts; outer hold is lazy on first edge excess).
+  Companion bug found by the same work: an AppBar widget hosted in
+  Scaffold.bottomNavigationBar collapses the Scaffold body to zero height
+  (void page under a lone bar, no throw — reproduced headless). Reverse
+  mode now uses a purpose-built bottom bar (plain Material + BackButton,
+  same content) instead. Regression: `test/detail_reverse_body_test.dart`
+  (reverse + non-reverse control).
 - [ ] Detail chrome direction — pinned viewer (info always visible, costs
   space) vs auto-hide immersion (current tap-toggle is inner-viewer only).
   Pulls opposite ways; awaiting user call before building either.

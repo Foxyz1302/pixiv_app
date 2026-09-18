@@ -2,6 +2,7 @@ import 'package:extended_tabs/extended_tabs.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:signals/signals_flutter.dart';
 
 import 'api_cache.dart';
 import 'artist_context.dart';
@@ -10,6 +11,7 @@ import 'detail_page.dart';
 import 'feed_screen.dart';
 import 'px_cache.dart';
 import 'web/pixiv_web_models.dart';
+import 'web_session.dart';
 
 class DetailScreen extends StatefulWidget {
   final List<WebDiscoveryIllust> items;
@@ -124,6 +126,20 @@ class _DetailScreenState extends State<DetailScreen> {
 
   @override
   Widget build(BuildContext context) {
+    return SignalBuilder(
+      builder: (context) {
+        final reversed = WebSession.instance.reverseDetails.value;
+        final bar = _buildBar(context);
+        return Scaffold(
+          appBar: reversed ? null : bar,
+          bottomNavigationBar: reversed ? _buildBottomBar() : null,
+          body: _buildPager(),
+        );
+      },
+    );
+  }
+
+  AppBar _buildBar(BuildContext context) {
     final artist = widget.artist;
     final current = widget.items[_current];
     final authorName = artist?.name.isNotEmpty == true
@@ -133,57 +149,106 @@ class _DetailScreenState extends State<DetailScreen> {
     final subtitle = artist != null
         ? _artistPosition(current)
         : current.title;
-    return Scaffold(
-      appBar: AppBar(
-        titleSpacing: 0,
-        title: InkWell(
-          borderRadius: BorderRadius.circular(8),
-          onTap: _openArtist,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 4),
-            child: Row(
-              spacing: 8,
-              children: [
-                ArtistAvatar(url: avatarUrl, radius: 16),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        authorName.isNotEmpty ? authorName : 'Pixiv',
-                        style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      Text(
-                        subtitle,
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: Theme.of(context).colorScheme.onSurfaceVariant,
-                        ),
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
+    return AppBar(
+      titleSpacing: 0,
+      title: _buildBarTitle(context, avatarUrl: avatarUrl, authorName: authorName, subtitle: subtitle),
+      actions: _buildBarActions(),
+    );
+  }
+
+  // Bottom bar for reverse mode. Deliberately NOT an AppBar widget: an
+  // AppBar in Scaffold.bottomNavigationBar collapses the Scaffold body to
+  // zero height (reproduced headless, both primary values), leaving a void
+  // page under a lone bar. Same content, plain Material shell.
+  Widget _buildBottomBar() {
+    // _current is valid here: _buildBar indexes the same list first and
+    // would throw before the Scaffold builds if it weren't.
+    final artist = widget.artist;
+    final current = widget.items[_current];
+    final authorName = artist?.name.isNotEmpty == true
+        ? artist!.name
+        : (current.userName ?? '');
+    final avatarUrl = artist?.avatarUrl ?? current.profileImageUrl ?? '';
+    final subtitle = artist != null
+        ? _artistPosition(current)
+        : current.title;
+    final scheme = Theme.of(context).colorScheme;
+    return Material(
+      color: scheme.surface,
+      child: SafeArea(
+        top: false,
+        child: SizedBox(
+          height: kToolbarHeight,
+          child: Row(
+            children: [
+              const BackButton(),
+              Expanded(
+                child: _buildBarTitle(context,
+                    avatarUrl: avatarUrl, authorName: authorName, subtitle: subtitle),
+              ),
+              ..._buildBarActions(),
+            ],
           ),
         ),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.favorite_border),
-            tooltip: 'Favorite',
-            onPressed: () => _comingSoon('Favoriting posts'),
-          ),
-          IconButton(
-            icon: const Icon(Icons.person_add_outlined),
-            tooltip: 'Follow artist',
-            onPressed: () => _comingSoon('Following artists'),
-          ),
-        ],
       ),
-      body: ExtendedPageView.builder(
+    );
+  }
+
+  Widget _buildBarTitle(BuildContext context,
+      {required String avatarUrl, required String authorName, required String subtitle}) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(8),
+      onTap: _openArtist,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 4),
+        child: Row(
+          spacing: 8,
+          children: [
+            ArtistAvatar(url: avatarUrl, radius: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    authorName.isNotEmpty ? authorName : 'Pixiv',
+                    style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  Text(
+                    subtitle,
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  List<Widget> _buildBarActions() {
+    return [
+      IconButton(
+        icon: const Icon(Icons.favorite_border),
+        tooltip: 'Favorite',
+        onPressed: () => _comingSoon('Favoriting posts'),
+      ),
+      IconButton(
+        icon: const Icon(Icons.person_add_outlined),
+        tooltip: 'Follow artist',
+        onPressed: () => _comingSoon('Following artists'),
+      ),
+    ];
+  }
+
+  Widget _buildPager() {
+    return ExtendedPageView.builder(
         // Stays hittable mid-animation (framework PageView ignores pointer
         // while driven, which used to route inner grabs to the outer here).
         shouldIgnorePointerWhenScrolling: false,
@@ -202,10 +267,9 @@ class _DetailScreenState extends State<DetailScreen> {
           onInnerDragEnd: _onInnerDragEnd,
           active: index == _current,
           preload: (index - _current).abs() == 1,
-          artist: artist,
+          artist: widget.artist,
         ),
-      ),
-    );
+      );
   }
 
   // Nested-pager handoff, done with the framework instead of against it.

@@ -66,6 +66,11 @@ single-bucket layout were suspect there).
 - Web platform has a separate `Config` impl; this app doesn't target web.
 - Ugoira zips are the balloon risk: drop `px_ugoira` stale to 3 d before
   touching anything else.
+- Hive returns every stored map as Map<dynamic, dynamic>; dart_mappable
+  demands Map<String, dynamic> at EVERY nesting level. Reads must go through
+  `deepStringKeys` (`lib/api_cache.dart`) — a shallow top-level `Map.from`
+  still explodes one level down, and only on cached reads (fresh jsonDecode
+  output is fine), so the failure looks endpoint-specific when it isn't.
 
 ## Not built (proposed, not approved)
 
