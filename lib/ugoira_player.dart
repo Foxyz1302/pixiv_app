@@ -72,6 +72,7 @@ class UgoiraSessionStore {
 class UgoiraPlayer extends StatefulWidget {
   final String illustId;
   final String posterUrl;
+  final String thumbUrl;
   final bool active;
   final bool preload;
 
@@ -79,6 +80,7 @@ class UgoiraPlayer extends StatefulWidget {
     super.key,
     required this.illustId,
     this.posterUrl = '',
+    this.thumbUrl = '',
     this.active = true,
     this.preload = false,
   });
@@ -108,6 +110,7 @@ class _UgoiraPlayerState extends State<UgoiraPlayer> {
   bool _loading = false;
   bool _cancelled = false;
   bool _everActive = false;
+  String? _zipUrl;
 
   @override
   void initState() {
@@ -145,6 +148,10 @@ class _UgoiraPlayerState extends State<UgoiraPlayer> {
         _loading = false;
         _cancelled = true;
         _partialBytes = 0;
+        final zipUrl = _zipUrl;
+        if (zipUrl != null && zipUrl.isNotEmpty) {
+          PxCache.instance.cancelDownload(zipUrl);
+        }
       }
       _nextFire = null;
       _refresh();
@@ -156,6 +163,10 @@ class _UgoiraPlayerState extends State<UgoiraPlayer> {
       _gen++;
       _loading = false;
       _partialBytes = 0;
+      final zipUrl = _zipUrl;
+      if (zipUrl != null && zipUrl.isNotEmpty) {
+        PxCache.instance.cancelDownload(zipUrl);
+      }
       _refresh();
     } else if (!widget.active &&
         widget.preload &&
@@ -174,6 +185,12 @@ class _UgoiraPlayerState extends State<UgoiraPlayer> {
     _dead = true;
     _timer?.cancel();
     _archive?.close();
+    if (_loading) {
+      final zipUrl = _zipUrl;
+      if (zipUrl != null && zipUrl.isNotEmpty) {
+        PxCache.instance.cancelDownload(zipUrl);
+      }
+    }
     super.dispose();
   }
 
@@ -181,6 +198,7 @@ class _UgoiraPlayerState extends State<UgoiraPlayer> {
     if (_loading) return;
     _started = true;
     _loading = true;
+    _zipUrl = null;
     _gen++;
     _load(_gen);
   }
@@ -212,6 +230,7 @@ class _UgoiraPlayerState extends State<UgoiraPlayer> {
         final zipUrl = meta.body.originalSrc.isNotEmpty
             ? meta.body.originalSrc
             : meta.body.src;
+        _zipUrl = zipUrl;
         final file = await PxCache.instance.ugoira.getSingleFile(zipUrl, headers: pxImageHeaders);
         if (gen != _gen || _dead) return;
         final source = await FileByteSource.open(file.path);
@@ -476,12 +495,19 @@ class _UgoiraPlayerState extends State<UgoiraPlayer> {
         child: Stack(
           fit: StackFit.expand,
           children: [
+            if (widget.thumbUrl.isNotEmpty && widget.thumbUrl != widget.posterUrl)
+              Image(
+                image: PxImageProvider(widget.thumbUrl, headers: pxImageHeaders, cacheManager: PxCache.instance.thumbs),
+                fit: BoxFit.contain,
+                gaplessPlayback: true,
+                errorBuilder: (context, error, stackTrace) => const SizedBox.shrink(),
+              ),
             if (widget.posterUrl.isNotEmpty)
               Image(
                 image: PxImageProvider(widget.posterUrl, headers: pxImageHeaders),
                 fit: BoxFit.contain,
-                errorBuilder: (context, error, stackTrace) =>
-                    const SizedBox.shrink(),
+                gaplessPlayback: true,
+                errorBuilder: (context, error, stackTrace) => const SizedBox.shrink(),
               ),
             if (_cancelled)
               const Center(

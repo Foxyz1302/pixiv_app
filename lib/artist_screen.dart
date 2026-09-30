@@ -14,12 +14,22 @@ class ArtistScreen extends StatefulWidget {
   final String userId;
   final String? initialName;
   final String? initialAvatarUrl;
+  final WebUserFull? initialUser;
+  final List<String>? initialOrderIds;
+  final List<String>? initialIllustIds;
+  final List<String>? initialMangaIds;
+  final Map<String, WebDiscoveryIllust>? initialWorks;
 
   const ArtistScreen({
     super.key,
     required this.userId,
     this.initialName,
     this.initialAvatarUrl,
+    this.initialUser,
+    this.initialOrderIds,
+    this.initialIllustIds,
+    this.initialMangaIds,
+    this.initialWorks,
   });
 
   @override
@@ -45,8 +55,19 @@ class _ArtistScreenState extends State<ArtistScreen> {
   @override
   void initState() {
     super.initState();
-    _fetchUser();
-    _fetchWorks();
+    if (widget.initialUser != null) {
+      _user = widget.initialUser;
+    } else {
+      _fetchUser();
+    }
+    if (widget.initialOrderIds != null &&
+        widget.initialOrderIds!.isNotEmpty &&
+        widget.initialIllustIds != null &&
+        widget.initialMangaIds != null) {
+      _seedFromInitial();
+    } else {
+      _fetchWorks();
+    }
   }
 
   Future<void> _fetchUser() async {
@@ -67,8 +88,11 @@ class _ArtistScreenState extends State<ArtistScreen> {
     List<String> illustIds,
     List<String> mangaIds,
   ) async {
-    final illustChunk = ids.where(illustIds.contains).toList();
-    final mangaChunk = ids.where(mangaIds.contains).toList();
+    final cached = ApiCache.instance.getCachedWorks(ids);
+    final missing = ids.where((id) => !cached.containsKey(id)).toList();
+    if (missing.isEmpty) return cached;
+    final illustChunk = missing.where(illustIds.contains).toList();
+    final mangaChunk = missing.where(mangaIds.contains).toList();
     final results = await Future.wait([
       illustChunk.isEmpty
           ? Future.value(
@@ -86,9 +110,49 @@ class _ArtistScreenState extends State<ArtistScreen> {
             ),
     ]);
     return <String, WebDiscoveryIllust>{
+      ...cached,
       ...(results[0] as WebUserProfileWorksResponse).body.works,
       ...(results[1] as WebUserProfileWorksResponse).body.works,
     };
+  }
+
+  Future<void> _seedFromInitial() async {
+    final order = List<String>.of(widget.initialOrderIds!);
+    final illustIds = List<String>.of(widget.initialIllustIds!);
+    final mangaIds = List<String>.of(widget.initialMangaIds!);
+    final seeded = Map<String, WebDiscoveryIllust>.of(widget.initialWorks ?? {});
+    setState(() {
+      _allIllustIds = illustIds;
+      _allMangaIds = mangaIds;
+      _illustCount = illustIds.length;
+      _mangaCount = mangaIds.length;
+      _pendingIds = order.skip(_chunkSize.clamp(0, order.length)).toList();
+    });
+    final first = order.take(_chunkSize).toList();
+    try {
+      final byId = Map<String, WebDiscoveryIllust>.of(seeded);
+      final missing = first.where((id) => !byId.containsKey(id)).toList();
+      if (missing.isNotEmpty) {
+        final fresh = await _hydrateChunk(widget.userId, missing, illustIds, mangaIds);
+        byId.addAll(fresh);
+      }
+      if (!mounted) return;
+      setState(() {
+        _works = [for (final id in first) if (byId[id] != null) byId[id]!];
+        _orderIds = [for (final w in _works) w.id];
+        _worksLoading = false;
+      });
+      if (_pendingIds.isNotEmpty) _loadMoreChunk();
+    } catch (e, stack) {
+      debugPrint('artist seed failed ${widget.userId}: $e\n$stack');
+      if (!mounted) return;
+      setState(() {
+        _works = [for (final id in first) if (seeded[id] != null) seeded[id]!];
+        _orderIds = [for (final w in _works) w.id];
+        _worksLoading = _works.isEmpty;
+        _worksFailure = _works.isEmpty ? e.toString() : null;
+      });
+    }
   }
 
   Future<void> _fetchWorks() async {
@@ -158,6 +222,7 @@ class _ArtistScreenState extends State<ArtistScreen> {
   void _openWork(int index) {
     final items = List<WebDiscoveryIllust>.of(_works);
     final user = _user;
+    final fullOrder = [..._allIllustIds, ..._allMangaIds]..sort((a, b) => _numericId(b).compareTo(_numericId(a)));
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => DetailScreen(
@@ -167,7 +232,7 @@ class _ArtistScreenState extends State<ArtistScreen> {
             userId: widget.userId,
             name: user?.name ?? widget.initialName ?? '',
             avatarUrl: _avatarUrl,
-            orderIds: List<String>.of(_orderIds),
+            orderIds: fullOrder.isNotEmpty ? fullOrder : List<String>.of(_orderIds),
           ),
         ),
       ),

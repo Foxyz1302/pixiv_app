@@ -6,11 +6,13 @@ import 'package:signals/signals_flutter.dart';
 import 'package:waterfall_flow/waterfall_flow.dart';
 
 import 'detail_screen.dart';
+import 'traversal_guard.dart';
 import 'artist_context.dart';
 import 'artist_screen.dart';
 import 'feed_screen.dart';
 import 'api_cache.dart';
 import 'px_cache.dart';
+import 'related_cache.dart';
 import 'ugoira_player.dart';
 import 'web/pixiv_web_models.dart';
 import 'web_session.dart';
@@ -46,6 +48,7 @@ class DetailPage extends StatefulWidget {
   final bool active;
   final bool preload;
   final ArtistContext? artist;
+  final double? viewerMaxHeight;
 
   const DetailPage({
     super.key,
@@ -56,6 +59,7 @@ class DetailPage extends StatefulWidget {
     this.active = true,
     this.preload = false,
     this.artist,
+    this.viewerMaxHeight,
   });
 
   @override
@@ -81,7 +85,6 @@ class _DetailPageState extends State<DetailPage> with AutomaticKeepAliveClientMi
   WebUserFull? _author;
   List<WebDiscoveryIllust> _artistWorks = [];
   List<String> _artistOrder = [];
-  int _artistIndex = -1;
   int _rangeLo = 0;
   int _rangeHi = 0;
   bool _artistLoading = false;
@@ -90,6 +93,11 @@ class _DetailPageState extends State<DetailPage> with AutomaticKeepAliveClientMi
   String? _artistFailure;
   List<String> _rangeIllustIds = [];
   List<String> _rangeMangaIds = [];
+  bool _authorFetchTriggered = false;
+  bool _initialFetchStarted = false;
+  Stopwatch? _fetchClock;
+  final Set<String> _thumbLogged = {};
+  final Set<String> _fullLogged = {};
 
   @override
   bool get wantKeepAlive => true;
@@ -97,8 +105,36 @@ class _DetailPageState extends State<DetailPage> with AutomaticKeepAliveClientMi
   @override
   void initState() {
     super.initState();
+    if (TraversalGuard.active) {
+      _deferInitialFetch();
+    } else {
+      _startInitialFetch();
+    }
+  }
+
+  @override
+  void didUpdateWidget(DetailPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!_initialFetchStarted && !TraversalGuard.active && (widget.active || widget.preload)) {
+      _startInitialFetch();
+    }
+  }
+
+  void _startInitialFetch() {
+    if (_initialFetchStarted) return;
+    _initialFetchStarted = true;
     _fetch();
     _fetchRelated();
+  }
+
+  Future<void> _deferInitialFetch() async {
+    while (TraversalGuard.active) {
+      await WidgetsBinding.instance.endOfFrame;
+      if (!mounted) return;
+    }
+    if (!mounted) return;
+    if (!(widget.active || widget.preload)) return;
+    _startInitialFetch();
   }
 
   @override
@@ -113,6 +149,11 @@ class _DetailPageState extends State<DetailPage> with AutomaticKeepAliveClientMi
 
   Future<void> _fetch() async {
     final id = widget.illust.id;
+    if (kDebugMode) {
+      _fetchClock = Stopwatch()..start();
+      _thumbLogged.clear();
+      _fullLogged.clear();
+    }
     try {
       final results = await Future.wait([ApiCache.instance.illustDetail(id), ApiCache.instance.illustPages(id)]);
       if (!mounted) return;
@@ -136,8 +177,7 @@ class _DetailPageState extends State<DetailPage> with AutomaticKeepAliveClientMi
           }
         }
       });
-      _precacheInnerPage(1);
-      _fetchAuthor();
+      _precacheThumbs();
     } catch (e, stack) {
       debugPrint('detail failed $id: $e\n$stack');
       if (!mounted) return;
@@ -146,6 +186,16 @@ class _DetailPageState extends State<DetailPage> with AutomaticKeepAliveClientMi
         _loading = false;
       });
     }
+  }
+
+  void _maybeFetchAuthor() {
+    if (_authorFetchTriggered) return;
+    if (widget.artist != null) return;
+    if (_detail == null) return;
+    _authorFetchTriggered = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _fetchAuthor();
+    });
   }
 
   Future<void> _fetchAuthor() async {
@@ -180,7 +230,6 @@ class _DetailPageState extends State<DetailPage> with AutomaticKeepAliveClientMi
       if (!mounted) return;
       setState(() {
         _artistOrder = order;
-        _artistIndex = currentIndex;
         _artistWorks = [
           for (final id in order)
             if (byId[id] != null) byId[id]!,
@@ -205,8 +254,11 @@ class _DetailPageState extends State<DetailPage> with AutomaticKeepAliveClientMi
   }
 
   Future<Map<String, WebDiscoveryIllust>> _hydrateIds(String userId, Set<String> ids, List<String> illustIds, List<String> mangaIds) async {
-    final windowIllustIds = ids.where(illustIds.contains).toList();
-    final windowMangaIds = ids.where(mangaIds.contains).toList();
+    final cached = ApiCache.instance.getCachedWorks(ids.toList());
+    final missing = ids.where((id) => !cached.containsKey(id)).toSet();
+    if (missing.isEmpty) return cached;
+    final windowIllustIds = missing.where(illustIds.contains).toList();
+    final windowMangaIds = missing.where(mangaIds.contains).toList();
     final hydrated = await Future.wait([
       windowIllustIds.isEmpty
           ? Future.value(WebUserProfileWorksResponse(false, body: WebUserProfileWorksBody()))
@@ -216,6 +268,7 @@ class _DetailPageState extends State<DetailPage> with AutomaticKeepAliveClientMi
           : ApiCache.instance.userProfileWorks(userId, windowMangaIds, workCategory: 'manga'),
     ]);
     return <String, WebDiscoveryIllust>{
+      ...cached,
       ...(hydrated[0] as WebUserProfileWorksResponse).body.works,
       ...(hydrated[1] as WebUserProfileWorksResponse).body.works,
     };
@@ -250,7 +303,7 @@ class _DetailPageState extends State<DetailPage> with AutomaticKeepAliveClientMi
 
   Future<void> _extendStrip({required bool older}) async {
     if (_extending || _artistOrder.isEmpty) return;
-    final userId = _detail?.userId ?? widget.illust.userId;
+    final userId = widget.artist?.userId ?? _detail?.userId ?? widget.illust.userId;
     if (userId == null || userId.isEmpty) return;
     final lo = _hydratedLo;
     final hi = _hydratedHi;
@@ -297,6 +350,11 @@ class _DetailPageState extends State<DetailPage> with AutomaticKeepAliveClientMi
           userId: userId,
           initialName: _author?.name ?? _detail?.userName ?? widget.illust.userName,
           initialAvatarUrl: _authorAvatar() ?? widget.illust.profileImageUrl,
+          initialUser: _author,
+          initialOrderIds: _artistOrder.isNotEmpty ? List<String>.of(_artistOrder) : null,
+          initialIllustIds: _rangeIllustIds.isNotEmpty ? List<String>.of(_rangeIllustIds) : null,
+          initialMangaIds: _rangeMangaIds.isNotEmpty ? List<String>.of(_rangeMangaIds) : null,
+          initialWorks: _artistWorks.isNotEmpty ? {for (final w in _artistWorks) w.id: w} : null,
         ),
       ),
     );
@@ -330,41 +388,20 @@ class _DetailPageState extends State<DetailPage> with AutomaticKeepAliveClientMi
     );
   }
 
-  Future<void> _openNeighbour(int delta) async {
-    if (_artistIndex < 0 || _artistOrder.isEmpty) return;
-    final target = _artistIndex + delta;
-    if (target < 0 || target >= _artistOrder.length) return;
-    final targetId = _artistOrder[target];
-    final hydratedIndex = _artistWorks.indexWhere((w) => w.id == targetId);
-    if (hydratedIndex >= 0) {
-      _openArtistWork(hydratedIndex);
-      return;
-    }
-    final userId = _detail?.userId ?? widget.illust.userId;
-    if (userId == null || userId.isEmpty || _extending) return;
-    setState(() {
-      _extending = true;
-      _extendingOlder = false;
-    });
-    try {
-      final byId = await _hydrateIds(userId, {targetId}, _rangeIllustIds, _rangeMangaIds);
-      if (!mounted) return;
-      setState(() => _extending = false);
-      final work = byId[targetId];
-      if (work == null) return;
-      _mergeWorks({for (final w in _artistWorks) w.id: w, ...byId});
-      final index = _artistWorks.indexWhere((w) => w.id == targetId);
-      if (index >= 0) _openArtistWork(index);
-    } catch (e, stack) {
-      debugPrint('neighbour hydrate failed $targetId: $e\n$stack');
-      if (!mounted) return;
-      setState(() => _extending = false);
-    }
-  }
-
   Future<void> _fetchRelated({bool more = false}) async {
     if (_relatedLoading) return;
     if (more && _relatedNext.isEmpty) return;
+    if (!more) {
+      final hit = RelatedCache.get(widget.illust.id);
+      if (hit != null) {
+        if (!mounted) return;
+        setState(() {
+          _related = List<WebDiscoveryIllust>.of(hit.illusts);
+          _relatedNext = List<String>.of(hit.nextIds);
+        });
+        return;
+      }
+    }
     setState(() {
       _relatedLoading = true;
       _relatedFailure = null;
@@ -377,6 +414,9 @@ class _DetailPageState extends State<DetailPage> with AutomaticKeepAliveClientMi
         _relatedNext = response.body.nextIds;
         _relatedLoading = false;
       });
+      if (!more) {
+        RelatedCache.put(widget.illust.id, response.body.illusts, response.body.nextIds);
+      }
     } catch (e, stack) {
       debugPrint('related failed ${widget.illust.id}: $e\n$stack');
       if (!mounted) return;
@@ -385,6 +425,26 @@ class _DetailPageState extends State<DetailPage> with AutomaticKeepAliveClientMi
         _relatedFailure = e.toString();
       });
     }
+  }
+
+  Future<void> _precacheThumbs() async {
+    if (!mounted) return;
+    final images = _pageImages(widget.illust, _detail);
+    for (final entry in images) {
+      final thumb = entry.thumbUrl;
+      if (thumb.isEmpty) continue;
+      try {
+        await precacheImage(
+          PxImageProvider(thumb, headers: imageHeaders, cacheManager: PxCache.instance.thumbs),
+          context,
+        );
+      } catch (e, stack) {
+        debugPrint('precache thumb failed $thumb: $e\n$stack');
+      }
+      if (!mounted) return;
+    }
+    if (!mounted) return;
+    _precacheInnerPage(1);
   }
 
   void _precacheInnerPage(int index) {
@@ -410,18 +470,28 @@ class _DetailPageState extends State<DetailPage> with AutomaticKeepAliveClientMi
     setState(() => _chromeVisible = !_chromeVisible);
   }
 
-  List<({String url, int width, int height})> _pageImages(WebDiscoveryIllust illust, WebIllustDetail? detail) {
+  List<({String url, String thumbUrl, int width, int height})> _pageImages(WebDiscoveryIllust illust, WebIllustDetail? detail) {
     if (_pages.isNotEmpty) {
+      final fallbackThumb = gridThumbUrl(illust);
       return [
         for (final page in _pages)
-          (url: page.urls.regular.isNotEmpty ? page.urls.regular : page.urls.original, width: page.width, height: page.height),
+          (
+            url: page.urls.regular.isNotEmpty ? page.urls.regular : page.urls.original,
+            thumbUrl: page.urls.small.isNotEmpty
+                ? page.urls.small
+                : page.urls.thumbMini.isNotEmpty
+                    ? page.urls.thumbMini
+                    : fallbackThumb,
+            width: page.width,
+            height: page.height,
+          ),
       ];
     }
     var url = gridThumbUrl(illust);
     if (detail != null && detail.urls.regular.isNotEmpty) {
       url = detail.urls.regular;
     }
-    return [(url: url, width: detail?.width ?? illust.width, height: detail?.height ?? illust.height)];
+    return [(url: url, thumbUrl: gridThumbUrl(illust), width: detail?.width ?? illust.width, height: detail?.height ?? illust.height)];
   }
 
   double _aspectFor(String url, int width, int height) {
@@ -455,51 +525,103 @@ class _DetailPageState extends State<DetailPage> with AutomaticKeepAliveClientMi
     return 1;
   }
 
-  Widget _stillImage(String url, {BoxFit fit = BoxFit.cover, Alignment alignment = Alignment.topCenter}) {
-    if (url.isEmpty) return const Icon(Icons.broken_image);
-    final token = _reloadTokens[url] ?? 0;
-    return GestureDetector(
-      onTap: _toggleChrome,
-      child: Image(
-        image: PxImageProvider(url, headers: imageHeaders, reloadToken: token),
-        fit: fit,
-        alignment: alignment,
-        gaplessPlayback: true,
-        loadingBuilder: (context, child, progress) {
-          if (progress == null) return child;
-          final expected = progress.expectedTotalBytes;
-          final value = expected != null && expected > 0 ? progress.cumulativeBytesLoaded / expected : null;
-          return Center(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                SizedBox(width: 28, height: 28, child: CircularProgressIndicator(value: value, strokeWidth: 3)),
-                if (value != null)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 6),
-                    child: Text('${(value * 100).round()}%', style: const TextStyle(fontSize: 12)),
-                  ),
-              ],
+  Widget _progressChip(double? value) {
+    return Container(
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(color: Colors.black45, borderRadius: BorderRadius.circular(12)),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          SizedBox(width: 28, height: 28, child: CircularProgressIndicator(value: value, strokeWidth: 3)),
+          if (value != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Text(
+                '${(value * 100).round()}%',
+                style: const TextStyle(fontSize: 12, color: Colors.white),
+              ),
             ),
-          );
-        },
-        errorBuilder: (context, error, stackTrace) {
-          debugPrint('detail image failed ${widget.illust.id}: $error');
-          return Center(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Icon(Icons.broken_image),
-                TextButton(onPressed: () => setState(() => _reloadTokens[url] = token + 1), child: const Text('Retry')),
-              ],
-            ),
-          );
-        },
+        ],
       ),
     );
   }
 
-  double? _viewerCap(BuildContext context) {
+  Widget _stillImage(String url,
+      {String? thumbUrl, BoxFit fit = BoxFit.cover, Alignment alignment = Alignment.topCenter, int pageIndex = 0}) {
+    if (url.isEmpty) return const Icon(Icons.broken_image);
+    final token = _reloadTokens[url] ?? 0;
+    final resolvedThumb = thumbUrl ?? gridThumbUrl(widget.illust);
+    final showThumb = resolvedThumb.isNotEmpty && url.isNotEmpty;
+    final full = Image(
+      image: PxImageProvider(url, headers: imageHeaders, reloadToken: token),
+      fit: fit,
+      alignment: alignment,
+      gaplessPlayback: true,
+      loadingBuilder: (context, child, progress) {
+        if (progress == null) {
+          if (kDebugMode) {
+            final key = '${widget.illust.id}:$pageIndex:f';
+            if (_fullLogged.add(key)) {
+              debugPrint('detail full ${widget.illust.id} page $pageIndex ${_fetchClock?.elapsedMilliseconds}ms');
+            }
+          }
+          return child;
+        }
+        final expected = progress.expectedTotalBytes;
+        final value = expected != null && expected > 0 ? progress.cumulativeBytesLoaded / expected : null;
+        return Center(child: _progressChip(value));
+      },
+      errorBuilder: (context, error, stackTrace) {
+        debugPrint('detail image failed ${widget.illust.id}: $error\n$stackTrace');
+        return Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.broken_image),
+              TextButton(onPressed: () => setState(() => _reloadTokens[url] = token + 1), child: const Text('Retry')),
+            ],
+          ),
+        );
+      },
+    );
+    if (!showThumb) {
+      return GestureDetector(onTap: _toggleChrome, child: full);
+    }
+    return GestureDetector(
+      onTap: _toggleChrome,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          Image(
+            image: PxImageProvider(resolvedThumb, headers: imageHeaders, cacheManager: PxCache.instance.thumbs),
+            fit: fit,
+            alignment: alignment,
+            gaplessPlayback: true,
+            frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
+              if (kDebugMode && frame != null) {
+                final key = '${widget.illust.id}:$pageIndex:t';
+                if (_thumbLogged.add(key)) {
+                  debugPrint('detail thumb ${widget.illust.id} page $pageIndex ${_fetchClock?.elapsedMilliseconds}ms');
+                }
+              }
+              return child;
+            },
+            errorBuilder: (context, error, stackTrace) {
+              debugPrint('detail thumb failed ${widget.illust.id} page $pageIndex: $error\n$stackTrace');
+              return const SizedBox.shrink();
+            },
+          ),
+          full,
+        ],
+      ),
+    );
+  }
+
+  double? _viewerCap() {
+    final pagerHeight = widget.viewerMaxHeight;
+    if (pagerHeight != null && pagerHeight.isFinite) {
+      return pagerHeight > 200 ? pagerHeight : null;
+    }
     final viewport = MediaQuery.sizeOf(context);
     if (viewport.width <= viewport.height) return null;
     final cap = viewport.height - kToolbarHeight - 16;
@@ -511,7 +633,7 @@ class _DetailPageState extends State<DetailPage> with AutomaticKeepAliveClientMi
     return viewWidth / aspect > cap ? cap : null;
   }
 
-  Widget _multiViewer(List<({String url, int width, int height})> pages) {
+  Widget _multiViewer(List<({String url, String thumbUrl, int width, int height})> pages) {
     final controller = _innerController!;
     final desktop =
         !kIsWeb &&
@@ -521,7 +643,7 @@ class _DetailPageState extends State<DetailPage> with AutomaticKeepAliveClientMi
     return LayoutBuilder(
       builder: (context, constraints) {
         final viewWidth = constraints.maxWidth.isFinite ? constraints.maxWidth : MediaQuery.of(context).size.width;
-        final cap = _viewerCap(context);
+        final cap = _viewerCap();
         final heights = <double>[];
         final contained = <bool>[];
         for (final page in pages) {
@@ -575,8 +697,9 @@ class _DetailPageState extends State<DetailPage> with AutomaticKeepAliveClientMi
                           width: viewWidth,
                           height: heights[index],
                           child: contained[index]
-                              ? _stillImage(pages[index].url, fit: BoxFit.contain, alignment: Alignment.center)
-                              : _stillImage(pages[index].url),
+                              ? _stillImage(pages[index].url,
+                                  thumbUrl: pages[index].thumbUrl, fit: BoxFit.contain, alignment: Alignment.center, pageIndex: index)
+                              : _stillImage(pages[index].url, thumbUrl: pages[index].thumbUrl, pageIndex: index),
                         ),
                       ),
                     ),
@@ -659,64 +782,6 @@ class _DetailPageState extends State<DetailPage> with AutomaticKeepAliveClientMi
           ]
         : [for (final t in illust.tags) (tag: t, translated: null as String?)];
     final isUgoira = (detail?.illustType ?? illust.illustType) == 2;
-    final viewWidth = MediaQuery.sizeOf(context).width;
-    final cap = _viewerCap(context);
-    final Widget viewer;
-    if (_loading) {
-      viewer = const AspectRatio(aspectRatio: 1, child: Center(child: CircularProgressIndicator()));
-    } else if (_failure != null) {
-      viewer = AspectRatio(
-        aspectRatio: 1,
-        child: Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            spacing: 8,
-            children: [
-              Text(_failure ?? 'No image'),
-              FilledButton(
-                onPressed: () {
-                  setState(() {
-                    _loading = true;
-                    _failure = null;
-                  });
-                  _fetch();
-                },
-                child: const Text('Retry'),
-              ),
-            ],
-          ),
-        ),
-      );
-    } else if (isUgoira) {
-      final pages = _pageImages(illust, detail);
-      final first = pages.first;
-      final imageUrl = first.url.isNotEmpty ? first.url : gridThumbUrl(illust);
-      final aspect = _aspectFor(imageUrl, detail?.width ?? illust.width, detail?.height ?? illust.height);
-      final capped = _cappedHeight(aspect, viewWidth, cap);
-      final player = UgoiraPlayer(illustId: illust.id, posterUrl: imageUrl, active: widget.active, preload: widget.preload);
-      viewer = capped != null
-          ? SizedBox(width: double.infinity, height: capped, child: player)
-          : AspectRatio(aspectRatio: aspect, child: player);
-    } else {
-      final pages = _pageImages(illust, detail);
-      if (pages.length > 1 && _innerController != null) {
-        viewer = _multiViewer(pages);
-      } else {
-        final single = pages.first;
-        final aspect = _aspectFor(single.url, single.width, single.height);
-        final capped = _cappedHeight(aspect, viewWidth, cap);
-        viewer = capped != null
-            ? SizedBox(
-                width: double.infinity,
-                height: capped,
-                child: _stillImage(single.url, fit: BoxFit.contain, alignment: Alignment.center),
-              )
-            : AspectRatio(
-                aspectRatio: aspect,
-                child: Stack(fit: StackFit.expand, children: [_stillImage(single.url)]),
-              );
-      }
-    }
     final infoChildren = [
       Text(title, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
       if (tagViews.isNotEmpty)
@@ -749,30 +814,132 @@ class _DetailPageState extends State<DetailPage> with AutomaticKeepAliveClientMi
     return SignalBuilder(
       builder: (context) {
         final reversed = WebSession.instance.reverseDetails.value;
+        final viewer = _buildViewer(illust, detail, isUgoira);
         final info = Padding(
           padding: const EdgeInsets.all(12),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: reversed ? infoChildren.reversed.toList() : infoChildren),
         );
-        if (!reversed) {
-          return ListView(
-            children: [
-              _ViewerKeepAlive(child: viewer),
-              info,
-              _artistStrip(),
-              _relatedSection(false),
-            ],
-          );
-        }
-        return ListView(
-          reverse: true,
-          children: [
-            _ViewerKeepAlive(child: viewer),
-            info,
-            _artistStrip(),
-            _relatedSection(true),
-          ],
-        );
+        return _buildDetailsList(reversed: reversed, viewer: viewer, info: info);
       },
+    );
+  }
+
+  Widget _buildViewer(WebDiscoveryIllust illust, WebIllustDetail? detail, bool isUgoira) {
+    final viewWidth = MediaQuery.sizeOf(context).width;
+    final cap = _viewerCap();
+    if (_loading) {
+      final thumb = gridThumbUrl(illust);
+      final aspect = thumbAspect(illust);
+      final capped = _cappedHeight(aspect <= 0 ? 1 : aspect, viewWidth, cap);
+      if (thumb.isEmpty) {
+        if (capped != null) {
+          return SizedBox(
+              width: double.infinity, height: capped, child: const Center(child: CircularProgressIndicator()));
+        }
+        return const AspectRatio(aspectRatio: 1, child: Center(child: CircularProgressIndicator()));
+      }
+      if (capped != null) {
+        return SizedBox(
+          width: double.infinity,
+          height: capped,
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              Image(
+                image: PxImageProvider(thumb, headers: imageHeaders, cacheManager: PxCache.instance.thumbs),
+                fit: BoxFit.contain,
+                alignment: Alignment.center,
+                gaplessPlayback: true,
+                errorBuilder: (context, error, stackTrace) => const SizedBox.shrink(),
+              ),
+              Center(child: _progressChip(null)),
+            ],
+          ),
+        );
+      }
+      return AspectRatio(
+        aspectRatio: aspect,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            Image(
+              image: PxImageProvider(thumb, headers: imageHeaders, cacheManager: PxCache.instance.thumbs),
+              fit: BoxFit.cover,
+              alignment: Alignment.topCenter,
+              gaplessPlayback: true,
+              errorBuilder: (context, error, stackTrace) => const SizedBox.shrink(),
+            ),
+            Center(child: _progressChip(null)),
+          ],
+        ),
+      );
+    } else if (_failure != null) {
+      final retry = Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          spacing: 8,
+          children: [
+            Text(_failure ?? 'No image'),
+            FilledButton(
+              onPressed: () {
+                setState(() {
+                  _loading = true;
+                  _failure = null;
+                });
+                _fetch();
+              },
+              child: const Text('Retry'),
+            ),
+          ],
+        ),
+      );
+      if (cap != null) {
+        return SizedBox(width: double.infinity, height: cap, child: retry);
+      }
+      return AspectRatio(aspectRatio: 1, child: retry);
+    } else if (isUgoira) {
+      final pages = _pageImages(illust, detail);
+      final first = pages.first;
+      final imageUrl = first.url.isNotEmpty ? first.url : gridThumbUrl(illust);
+      final aspect = _aspectFor(imageUrl, detail?.width ?? illust.width, detail?.height ?? illust.height);
+      final capped = _cappedHeight(aspect, viewWidth, cap);
+      final thumb = gridThumbUrl(illust);
+      final player = UgoiraPlayer(illustId: illust.id, posterUrl: imageUrl, thumbUrl: thumb, active: widget.active, preload: widget.preload);
+      return capped != null
+          ? SizedBox(width: double.infinity, height: capped, child: player)
+          : AspectRatio(aspectRatio: aspect, child: player);
+    } else {
+      final pages = _pageImages(illust, detail);
+      if (pages.length > 1 && _innerController != null) {
+        return _multiViewer(pages);
+      } else {
+        final single = pages.first;
+        final aspect = _aspectFor(single.url, single.width, single.height);
+        final capped = _cappedHeight(aspect, viewWidth, cap);
+        return capped != null
+            ? SizedBox(
+                width: double.infinity,
+                height: capped,
+                child: _stillImage(single.url,
+                    thumbUrl: single.thumbUrl, fit: BoxFit.contain, alignment: Alignment.center),
+              )
+            : AspectRatio(
+                aspectRatio: aspect,
+                child: Stack(fit: StackFit.expand, children: [_stillImage(single.url, thumbUrl: single.thumbUrl)]),
+              );
+      }
+    }
+  }
+
+  Widget _buildDetailsList({required bool reversed, required Widget viewer, required Widget info}) {
+    return ListView(
+      reverse: reversed,
+      children: [
+        _ViewerKeepAlive(child: viewer),
+        info,
+        _artistStrip(),
+        _relatedSection(reversed),
+      ],
     );
   }
 
@@ -780,6 +947,7 @@ class _DetailPageState extends State<DetailPage> with AutomaticKeepAliveClientMi
   // that reversing it buys nothing.
   Widget _artistStrip() {
     if (widget.artist != null) return const SizedBox.shrink();
+    _maybeFetchAuthor();
     if (_artistLoading && _artistWorks.isEmpty) {
       return const Padding(
         padding: EdgeInsets.fromLTRB(12, 4, 12, 8),
@@ -804,8 +972,6 @@ class _DetailPageState extends State<DetailPage> with AutomaticKeepAliveClientMi
       }
       return const SizedBox.shrink();
     }
-    final prevId = _artistIndex > 0 ? _artistOrder[_artistIndex - 1] : null;
-    final nextId = _artistIndex >= 0 && _artistIndex + 1 < _artistOrder.length ? _artistOrder[_artistIndex + 1] : null;
     final header = Row(
       children: [
         Expanded(
@@ -818,8 +984,6 @@ class _DetailPageState extends State<DetailPage> with AutomaticKeepAliveClientMi
             ),
           ),
         ),
-        if (prevId != null) TextButton(onPressed: _extending ? null : () => _openNeighbour(-1), child: const Text('‹ Prev')),
-        if (nextId != null) TextButton(onPressed: _extending ? null : () => _openNeighbour(1), child: const Text('Next ›')),
       ],
     );
     final lo = _hydratedLo;
@@ -867,10 +1031,12 @@ class _DetailPageState extends State<DetailPage> with AutomaticKeepAliveClientMi
                         errorBuilder: (context, error, stackTrace) =>
                             const ColoredBox(color: Colors.black12, child: Icon(Icons.broken_image)),
                       ),
+                    if (work.xRestrict == 1)
+                      const Positioned(top: 4, left: 4, child: TileBadge('R18')),
                     if (work.illustType == 2)
-                      const Positioned(top: 4, left: 4, child: TileBadge('UGOIRA'))
-                    else if (work.pageCount > 1)
-                      Positioned(top: 4, right: 4, child: TileBadge('${work.pageCount}')),
+                      const Positioned(top: 4, right: 4, child: TileBadge('', icon: Icons.play_arrow)),
+                    if (work.pageCount > 1)
+                      Positioned(bottom: 4, right: 4, child: TileBadge('${work.pageCount}', icon: Icons.photo_library)),
                   ],
                 ),
               ),

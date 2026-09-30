@@ -30,6 +30,30 @@ class ApiCache {
   ApiCache._();
 
   static const String boxName = 'pixiv_api';
+  static const int workCacheCap = 500;
+  static final Map<String, WebDiscoveryIllust> _workCache = {};
+
+  Map<String, WebDiscoveryIllust> getCachedWorks(List<String> ids) {
+    final hits = <String, WebDiscoveryIllust>{};
+    for (final id in ids) {
+      final w = _workCache[id];
+      if (w != null) hits[id] = w;
+    }
+    return hits;
+  }
+
+  void _storeWorks(Map<String, WebDiscoveryIllust> works) {
+    for (final entry in works.entries) {
+      if (_workCache.containsKey(entry.key)) {
+        _workCache[entry.key] = entry.value;
+        continue;
+      }
+      while (_workCache.length >= workCacheCap) {
+        _workCache.remove(_workCache.keys.first);
+      }
+      _workCache[entry.key] = entry.value;
+    }
+  }
 
   late final Box _box;
 
@@ -131,6 +155,7 @@ class ApiCache {
         message = response.message;
       }
       works.addAll(response.body.works);
+      _storeWorks(response.body.works);
     }
     return WebUserProfileWorksResponse(
       error,

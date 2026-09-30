@@ -173,6 +173,26 @@ void main() {
     expect(h.outerController.page, 2.0);
   });
 
+  testWidgets('stopped release past threshold commits (origin pinned at drag start)', (tester) async {
+    final h = _Harness(tester);
+    await h.pump();
+
+    final gesture = await tester.startGesture(tester.getCenter(find.text('inner 2')));
+    for (var i = 0; i < 30; i++) {
+      await gesture.moveBy(const Offset(-20, 0));
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+    for (var i = 0; i < 10; i++) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+    expect(h.outerPixels, greaterThan(800.0 + 800.0 * 0.12),
+        reason: 'setup: outer must sit past the 0.12 commit threshold before release, got ${h.outerPixels}');
+    await gesture.up();
+    await tester.pumpAndSettle();
+    expect(h.outerController.page, 2.0,
+        reason: 'fully-stopped release past threshold must commit, not snap back');
+  });
+
   testWidgets('trembling push advances net-forward without snap-back', (tester) async {
     final h = _Harness(tester);
     await h.pump();

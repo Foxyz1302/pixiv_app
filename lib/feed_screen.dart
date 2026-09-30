@@ -250,10 +250,12 @@ class FeedTile extends StatelessWidget {
                 child: InkWell(onTap: onTap),
               ),
             ),
+            if (illust.xRestrict == 1)
+              const Positioned(top: 4, left: 4, child: TileBadge('R18')),
             if (illust.illustType == 2)
-              const Positioned(top: 4, left: 4, child: TileBadge('UGOIRA'))
-            else if (illust.pageCount > 1)
-              Positioned(top: 4, right: 4, child: TileBadge('${illust.pageCount}')),
+              const Positioned(top: 4, right: 4, child: TileBadge('', icon: Icons.play_arrow)),
+            if (illust.pageCount > 1)
+              Positioned(bottom: 4, right: 4, child: TileBadge('${illust.pageCount}', icon: Icons.photo_library)),
           ],
         ),
       ),
@@ -263,15 +265,25 @@ class FeedTile extends StatelessWidget {
 
 class TileBadge extends StatelessWidget {
   final String label;
+  final IconData? icon;
 
-  const TileBadge(this.label, {super.key});
+  const TileBadge(this.label, {super.key, this.icon});
 
   @override
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
       decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.circular(4)),
-      child: Text(label, style: const TextStyle(fontSize: 10, color: Colors.white)),
+      child: icon == null
+          ? Text(label, style: const TextStyle(fontSize: 10, color: Colors.white))
+          : Row(
+              mainAxisSize: MainAxisSize.min,
+              spacing: 2,
+              children: [
+                Icon(icon, size: 11, color: Colors.white),
+                if (label.isNotEmpty) Text(label, style: const TextStyle(fontSize: 10, color: Colors.white)),
+              ],
+            ),
     );
   }
 }
@@ -291,6 +303,7 @@ class _DisplayDialog extends StatelessWidget {
       content: SignalBuilder(
         builder: (context) {
           final width = session.tileWidth.value;
+          final mini = session.miniTileSize.value;
           final reversed = session.reverseDetails.value;
           return Column(
             mainAxisSize: MainAxisSize.min,
@@ -317,7 +330,33 @@ class _DisplayDialog extends StatelessWidget {
                   ),
                 ],
               ),
-              Text('${width.round()} px'),
+              Text('${width.round()} px tiles'),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.remove),
+                    onPressed:
+                        mini <= WebSession.minMiniTileSize ? null : () => session.setMiniTileSize(mini - 4),
+                  ),
+                  Expanded(
+                    child: Slider(
+                      value: mini,
+                      min: WebSession.minMiniTileSize,
+                      max: WebSession.maxMiniTileSize,
+                      divisions: 12,
+                      label: '${mini.round()}',
+                      onChanged: session.setMiniTileSize,
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.add),
+                    onPressed:
+                        mini >= WebSession.maxMiniTileSize ? null : () => session.setMiniTileSize(mini + 4),
+                  ),
+                ],
+              ),
+              Text('${mini.round()} px minimap'),
               const SizedBox(height: 8),
               SwitchListTile(
                 title: const Text('Bottom-focused details'),
