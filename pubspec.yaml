@@ -18,7 +18,9 @@ dependencies:
   hive_ce_flutter: ^2.3.4
   koni_archive: ^0.9.0
   leaf_widgets:
-    path: ../leaf_widgets
+    git:
+      url: https://github.com/Foxyz1302/leaf_widgets.git
+      ref: master
   signals: ^7.1.0
   waterfall_flow: ^3.1.1
 

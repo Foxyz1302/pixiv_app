@@ -454,10 +454,12 @@ packages:
   leaf_widgets:
     dependency: "direct main"
     description:
-      path: "../leaf_widgets"
-      relative: true
-    source: path
-    version: "0.0.1"
+      path: "."
+      ref: master
+      resolved-ref: "8e7a56337159c0b968014c2d922bb0849ae4a3a1"
+      url: "https://github.com/Foxyz1302/leaf_widgets.git"
+    source: git
+    version: "0.2.1"
   leak_tracker:
     dependency: transitive
     description:
@@ -518,10 +520,10 @@ packages:
     dependency: transitive
     description:
       name: meta
-      sha256: c82594181e3312f3d0695fc95aaaf7758d75b8d4ae2bbecf223b9fd5109a059d
+      sha256: "307249ce4ff29d58a18e97f6345f539382eb9c9c29ecda628900f31de0443dd9"
       url: "https://pub.dev"
     source: hosted
-    version: "1.18.3"
+    version: "1.19.0"
   mime:
     dependency: transitive
     description:
