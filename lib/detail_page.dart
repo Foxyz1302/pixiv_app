@@ -99,12 +99,18 @@ class _DetailPageState extends State<DetailPage> with AutomaticKeepAliveClientMi
   final Set<String> _thumbLogged = {};
   final Set<String> _fullLogged = {};
 
+  // Only the current page and its preload neighbors stay mounted. A page
+  // released past that window unmounts and its decoded images leave the
+  // live image set; swiping back rebuilds it from the Hive/disk caches.
   @override
-  bool get wantKeepAlive => true;
+  bool get wantKeepAlive => widget.active || widget.preload;
 
   @override
   void initState() {
     super.initState();
+    if (widget.illust.pageCount > 1) {
+      _innerController = PageController();
+    }
     if (TraversalGuard.active) {
       _deferInitialFetch();
     } else {
@@ -115,6 +121,9 @@ class _DetailPageState extends State<DetailPage> with AutomaticKeepAliveClientMi
   @override
   void didUpdateWidget(DetailPage oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (widget.active != oldWidget.active || widget.preload != oldWidget.preload) {
+      updateKeepAlive();
+    }
     if (!_initialFetchStarted && !TraversalGuard.active && (widget.active || widget.preload)) {
       _startInitialFetch();
     }
@@ -162,8 +171,7 @@ class _DetailPageState extends State<DetailPage> with AutomaticKeepAliveClientMi
         _pages = (results[1] as WebIllustPagesResponse).body;
         _loading = false;
         if (_pages.length > 1 && _innerController == null) {
-          _innerController = PageController();
-          _innerIndex = 0;
+          _innerController = PageController(initialPage: _innerIndex.clamp(0, _pages.length - 1));
         } else if (_innerController != null) {
           if (_pages.length <= 1) {
             _innerController!.dispose();
@@ -177,6 +185,9 @@ class _DetailPageState extends State<DetailPage> with AutomaticKeepAliveClientMi
           }
         }
       });
+      if (_innerIndex > 0) {
+        _precacheInnerPage(_innerIndex + 1);
+      }
       _precacheThumbs();
     } catch (e, stack) {
       debugPrint('detail failed $id: $e\n$stack');
@@ -494,6 +505,16 @@ class _DetailPageState extends State<DetailPage> with AutomaticKeepAliveClientMi
     return [(url: url, thumbUrl: gridThumbUrl(illust), width: detail?.width ?? illust.width, height: detail?.height ?? illust.height)];
   }
 
+  // Cover-thumb stand-ins for the pager built while illustPages is still in
+  // flight; pageCount is known from the feed item, so swiping works before
+  // any per-page URL does.
+  List<({String url, String thumbUrl, int width, int height})> _placeholderPages(WebDiscoveryIllust illust) {
+    return [
+      for (var i = 0; i < illust.pageCount; i++)
+        (url: '', thumbUrl: gridThumbUrl(illust), width: illust.width, height: illust.height),
+    ];
+  }
+
   double _aspectFor(String url, int width, int height) {
     if (width > 0 && height > 0) return width / height;
     final decoded = _decodedAspect[url];
@@ -548,9 +569,27 @@ class _DetailPageState extends State<DetailPage> with AutomaticKeepAliveClientMi
 
   Widget _stillImage(String url,
       {String? thumbUrl, BoxFit fit = BoxFit.cover, Alignment alignment = Alignment.topCenter, int pageIndex = 0}) {
-    if (url.isEmpty) return const Icon(Icons.broken_image);
-    final token = _reloadTokens[url] ?? 0;
     final resolvedThumb = thumbUrl ?? gridThumbUrl(widget.illust);
+    if (url.isEmpty) {
+      return GestureDetector(
+        onTap: _toggleChrome,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            if (resolvedThumb.isNotEmpty)
+              Image(
+                image: PxImageProvider(resolvedThumb, headers: imageHeaders, cacheManager: PxCache.instance.thumbs),
+                fit: fit,
+                alignment: alignment,
+                gaplessPlayback: true,
+                errorBuilder: (context, error, stackTrace) => const SizedBox.shrink(),
+              ),
+            Center(child: _progressChip(null)),
+          ],
+        ),
+      );
+    }
+    final token = _reloadTokens[url] ?? 0;
     final showThumb = resolvedThumb.isNotEmpty && url.isNotEmpty;
     final full = Image(
       image: PxImageProvider(url, headers: imageHeaders, reloadToken: token),
@@ -827,7 +866,47 @@ class _DetailPageState extends State<DetailPage> with AutomaticKeepAliveClientMi
   Widget _buildViewer(WebDiscoveryIllust illust, WebIllustDetail? detail, bool isUgoira) {
     final viewWidth = MediaQuery.sizeOf(context).width;
     final cap = _viewerCap();
+    if (_failure != null) {
+      final retry = Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          spacing: 8,
+          children: [
+            Text(_failure ?? 'No image'),
+            FilledButton(
+              onPressed: () {
+                setState(() {
+                  _loading = true;
+                  _failure = null;
+                });
+                _fetch();
+              },
+              child: const Text('Retry'),
+            ),
+          ],
+        ),
+      );
+      if (cap != null) {
+        return SizedBox(width: double.infinity, height: cap, child: retry);
+      }
+      return AspectRatio(aspectRatio: 1, child: retry);
+    }
+    if (isUgoira) {
+      final pages = _pageImages(illust, detail);
+      final first = pages.first;
+      final imageUrl = first.url.isNotEmpty ? first.url : gridThumbUrl(illust);
+      final aspect = _aspectFor(imageUrl, detail?.width ?? illust.width, detail?.height ?? illust.height);
+      final capped = _cappedHeight(aspect, viewWidth, cap);
+      final thumb = gridThumbUrl(illust);
+      final player = UgoiraPlayer(illustId: illust.id, posterUrl: imageUrl, thumbUrl: thumb, active: widget.active, preload: widget.preload);
+      return capped != null
+          ? SizedBox(width: double.infinity, height: capped, child: player)
+          : AspectRatio(aspectRatio: aspect, child: player);
+    }
     if (_loading) {
+      if (illust.pageCount > 1 && _innerController != null) {
+        return _multiViewer(_placeholderPages(illust));
+      }
       final thumb = gridThumbUrl(illust);
       final aspect = thumbAspect(illust);
       final capped = _cappedHeight(aspect <= 0 ? 1 : aspect, viewWidth, cap);
@@ -873,73 +952,46 @@ class _DetailPageState extends State<DetailPage> with AutomaticKeepAliveClientMi
           ],
         ),
       );
-    } else if (_failure != null) {
-      final retry = Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          spacing: 8,
-          children: [
-            Text(_failure ?? 'No image'),
-            FilledButton(
-              onPressed: () {
-                setState(() {
-                  _loading = true;
-                  _failure = null;
-                });
-                _fetch();
-              },
-              child: const Text('Retry'),
-            ),
-          ],
-        ),
-      );
-      if (cap != null) {
-        return SizedBox(width: double.infinity, height: cap, child: retry);
-      }
-      return AspectRatio(aspectRatio: 1, child: retry);
-    } else if (isUgoira) {
-      final pages = _pageImages(illust, detail);
-      final first = pages.first;
-      final imageUrl = first.url.isNotEmpty ? first.url : gridThumbUrl(illust);
-      final aspect = _aspectFor(imageUrl, detail?.width ?? illust.width, detail?.height ?? illust.height);
-      final capped = _cappedHeight(aspect, viewWidth, cap);
-      final thumb = gridThumbUrl(illust);
-      final player = UgoiraPlayer(illustId: illust.id, posterUrl: imageUrl, thumbUrl: thumb, active: widget.active, preload: widget.preload);
-      return capped != null
-          ? SizedBox(width: double.infinity, height: capped, child: player)
-          : AspectRatio(aspectRatio: aspect, child: player);
+    }
+    final pages = _pageImages(illust, detail);
+    if (pages.length > 1 && _innerController != null) {
+      return _multiViewer(pages);
     } else {
-      final pages = _pageImages(illust, detail);
-      if (pages.length > 1 && _innerController != null) {
-        return _multiViewer(pages);
-      } else {
-        final single = pages.first;
-        final aspect = _aspectFor(single.url, single.width, single.height);
-        final capped = _cappedHeight(aspect, viewWidth, cap);
-        return capped != null
-            ? SizedBox(
-                width: double.infinity,
-                height: capped,
-                child: _stillImage(single.url,
-                    thumbUrl: single.thumbUrl, fit: BoxFit.contain, alignment: Alignment.center),
-              )
-            : AspectRatio(
-                aspectRatio: aspect,
-                child: Stack(fit: StackFit.expand, children: [_stillImage(single.url, thumbUrl: single.thumbUrl)]),
-              );
-      }
+      final single = pages.first;
+      final aspect = _aspectFor(single.url, single.width, single.height);
+      final capped = _cappedHeight(aspect, viewWidth, cap);
+      return capped != null
+          ? SizedBox(
+              width: double.infinity,
+              height: capped,
+              child: _stillImage(single.url,
+                  thumbUrl: single.thumbUrl, fit: BoxFit.contain, alignment: Alignment.center),
+            )
+          : AspectRatio(
+              aspectRatio: aspect,
+              child: Stack(fit: StackFit.expand, children: [_stillImage(single.url, thumbUrl: single.thumbUrl)]),
+            );
     }
   }
 
   Widget _buildDetailsList({required bool reversed, required Widget viewer, required Widget info}) {
-    return ListView(
-      reverse: reversed,
-      children: [
-        _ViewerKeepAlive(child: viewer),
-        info,
-        _artistStrip(),
-        _relatedSection(reversed),
-      ],
+    // Keepalive notifications from inside this ListView (the viewer) must
+    // stop here: AutomaticKeepAlive returns false and they would otherwise
+    // bubble up and register with the outer pager's page wrapper, pinning
+    // the whole page until route pop and defeating the conditional
+    // keepalive. The inner wrappers still receive it first (they are below
+    // this listener), so the viewer stays alive within the list.
+    return NotificationListener<KeepAliveNotification>(
+      onNotification: (_) => true,
+      child: ListView(
+        reverse: reversed,
+        children: [
+          _ViewerKeepAlive(child: viewer),
+          info,
+          _artistStrip(),
+          _relatedSection(reversed),
+        ],
+      ),
     );
   }
 

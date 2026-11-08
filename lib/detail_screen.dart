@@ -108,47 +108,66 @@ class _DetailScreenState extends State<DetailScreen> {
         );
       }
       Future.microtask(() {
-        final detailFuture = ApiCache.instance.illustDetail(item.id);
-        final pagesFuture = ApiCache.instance.illustPages(item.id);
-        detailFuture.then((_) {}, onError: (e) {
-          debugPrint('prefetch detail failed ${item.id}: $e');
-        });
-        pagesFuture.then((_) {}, onError: (e) {
-          debugPrint('prefetch pages failed ${item.id}: $e');
-        });
-        final neighborUserId = item.userId;
-        if (neighborUserId != null && neighborUserId.isNotEmpty) {
-          ApiCache.instance.userWorksAll(neighborUserId).then((_) {}, onError: (e) {
-            debugPrint('prefetch works failed $neighborUserId: $e');
-          });
+        try {
+          _prefetchNeighbor(item);
+        } catch (e) {
+          debugPrint('prefetch setup failed ${item.id}: $e');
         }
-        WebSession.instance.client.related(item.id, limit: 18).then((r) {
-          RelatedCache.put(item.id, r.body.illusts, r.body.nextIds);
-        }, onError: (e) {
-          debugPrint('prefetch related failed ${item.id}: $e');
-        });
-        Future.wait([detailFuture, pagesFuture]).then((results) {
-          if (!mounted) return;
-          if (_controller.hasClients && _controller.position.isScrollingNotifier.value) return;
-          final pages = (results[1] as WebIllustPagesResponse).body;
-          String fullUrl = '';
-          if (pages.isNotEmpty) {
-            final first = pages.first;
-            fullUrl = first.urls.regular.isNotEmpty ? first.urls.regular : first.urls.original;
-          } else {
-            fullUrl = (results[0] as WebIllustDetailResponse).body.urls.regular;
-          }
-          if (fullUrl.isEmpty) return;
-          precacheImage(
-            PxImageProvider(fullUrl, headers: imageHeaders, cacheManager: PxCache.instance.fulls),
-            context,
-            onError: (error, stackTrace) {
-              debugPrint('precache full failed $fullUrl: $error');
-            },
-          );
-        }, onError: (_) {});
       });
     }
+  }
+
+  void _prefetchNeighbor(WebDiscoveryIllust item) {
+    final detailFuture = ApiCache.instance.illustDetail(item.id);
+    final pagesFuture = ApiCache.instance.illustPages(item.id);
+    detailFuture.then((_) {}, onError: (e) {
+      debugPrint('prefetch detail failed ${item.id}: $e');
+    });
+    pagesFuture.then((_) {}, onError: (e) {
+      debugPrint('prefetch pages failed ${item.id}: $e');
+    });
+    if (item.illustType == 2) {
+      ApiCache.instance.ugoiraMeta(item.id).then((meta) {
+        final src = meta.body.originalSrc.isNotEmpty ? meta.body.originalSrc : meta.body.src;
+        if (src.isEmpty) return;
+        PxCache.instance.ugoira.getSingleFile(src, headers: pxImageHeaders).then((_) {}, onError: (e) {
+          debugPrint('prefetch ugoira failed ${item.id}: $e');
+        });
+      }, onError: (e) {
+        debugPrint('prefetch ugoira meta failed ${item.id}: $e');
+      });
+    }
+    final neighborUserId = item.userId;
+    if (neighborUserId != null && neighborUserId.isNotEmpty) {
+      ApiCache.instance.userWorksAll(neighborUserId).then((_) {}, onError: (e) {
+        debugPrint('prefetch works failed $neighborUserId: $e');
+      });
+    }
+    WebSession.instance.client.related(item.id, limit: 18).then((r) {
+      RelatedCache.put(item.id, r.body.illusts, r.body.nextIds);
+    }, onError: (e) {
+      debugPrint('prefetch related failed ${item.id}: $e');
+    });
+    Future.wait([detailFuture, pagesFuture]).then((results) {
+      if (!mounted) return;
+      if (_controller.hasClients && _controller.position.isScrollingNotifier.value) return;
+      final pages = (results[1] as WebIllustPagesResponse).body;
+      String fullUrl = '';
+      if (pages.isNotEmpty) {
+        final first = pages.first;
+        fullUrl = first.urls.regular.isNotEmpty ? first.urls.regular : first.urls.original;
+      } else {
+        fullUrl = (results[0] as WebIllustDetailResponse).body.urls.regular;
+      }
+      if (fullUrl.isEmpty) return;
+      precacheImage(
+        PxImageProvider(fullUrl, headers: imageHeaders, cacheManager: PxCache.instance.fulls),
+        context,
+        onError: (error, stackTrace) {
+          debugPrint('precache full failed $fullUrl: $error');
+        },
+      );
+    }, onError: (_) {});
   }
 
   WebDiscoveryIllust _currentWork() {
